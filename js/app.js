@@ -6,6 +6,8 @@
   'use strict';
 
   let editor;
+  let lastImage = null;       // 最近一次上传的图片，用于实时重新转换
+  let reprocessTimer = null;  // 防抖
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
@@ -74,7 +76,12 @@
       const cols = parseInt($('#size-cols').value, 10);
       const rows = parseInt($('#size-rows').value, 10);
       if (cols >= 5 && cols <= 200 && rows >= 5 && rows <= 200) {
-        editor.resize(cols, rows);
+        // 已上传图片且未启用自动尺寸 → 用新尺寸重新转换图片
+        if (lastImage && !$('#opt-auto-size').checked) {
+          reprocessImage();
+        } else {
+          editor.resize(cols, rows);
+        }
       }
     });
 
@@ -83,7 +90,11 @@
         const [c, r] = b.dataset.preset.split('x').map(Number);
         $('#size-cols').value = c;
         $('#size-rows').value = r;
-        editor.resize(c, r);
+        if (lastImage && !$('#opt-auto-size').checked) {
+          reprocessImage();
+        } else {
+          editor.resize(c, r);
+        }
       });
     });
   }
@@ -103,6 +114,12 @@
     $('#btn-numbers').addEventListener('click', () => {
       editor.showNumbers = !editor.showNumbers;
       $('#btn-numbers').classList.toggle('active', editor.showNumbers);
+      editor.render();
+    });
+    $('#btn-shape').addEventListener('click', () => {
+      editor.beadShape = editor.beadShape === 'square' ? 'round' : 'square';
+      const btn = $('#btn-shape');
+      btn.textContent = editor.beadShape === 'square' ? t('action.shape') : t('action.shape-round');
       editor.render();
     });
   }
@@ -133,6 +150,48 @@
     if (bSlider) bSlider.addEventListener('input', () => bVal.textContent = bSlider.value);
     const cSlider = $('#opt-contrast'),   cVal = $('#opt-contrast-val');
     if (cSlider) cSlider.addEventListener('input', () => cVal.textContent = parseFloat(cSlider.value).toFixed(1));
+    const tSlider = $('#opt-target-size'), tVal = $('#opt-target-size-val');
+    if (tSlider) tSlider.addEventListener('input', () => tVal.textContent = tSlider.value);
+    const kSlider = $('#opt-kmeans'), kVal = $('#opt-kmeans-val');
+    if (kSlider) {
+      const syncK = () => {
+        const v = parseInt(kSlider.value, 10);
+        kVal.textContent = (v < 2) ? t('image.kmeans-off') : v;
+      };
+      kSlider.addEventListener('input', syncK);
+      document.addEventListener('lang:changed', syncK);
+      syncK();
+    }
+    const sSlider = $('#opt-smooth'), sVal = $('#opt-smooth-val');
+    if (sSlider) {
+      const syncS = () => {
+        const v = parseInt(sSlider.value, 10);
+        sVal.textContent = (v <= 0) ? t('image.kmeans-off') : v;
+      };
+      sSlider.addEventListener('input', syncS);
+      document.addEventListener('lang:changed', syncS);
+      syncS();
+    }
+    const mcSlider = $('#opt-max-colors'), mcVal = $('#opt-max-colors-val');
+    if (mcSlider) {
+      const syncMC = () => {
+        const v = parseInt(mcSlider.value, 10);
+        mcVal.textContent = (v < 2) ? t('image.kmeans-off') : v;
+      };
+      mcSlider.addEventListener('input', syncMC);
+      document.addEventListener('lang:changed', syncMC);
+      syncMC();
+    }
+    const mrSlider = $('#opt-min-region'), mrVal = $('#opt-min-region-val');
+    if (mrSlider) {
+      const syncMR = () => {
+        const v = parseInt(mrSlider.value, 10);
+        mrVal.textContent = (v <= 1) ? t('image.kmeans-off') : v;
+      };
+      mrSlider.addEventListener('input', syncMR);
+      document.addEventListener('lang:changed', syncMR);
+      syncMR();
+    }
 
     // 自动尺寸开关：禁用手动 cols/rows
     const autoSize = $('#opt-auto-size');
@@ -146,32 +205,56 @@
       autoSize.addEventListener('change', sync);
       sync();
     }
+
+    // 图片上传后，调整任何转换参数都自动重新生成
+    ['#opt-target-size', '#opt-brightness', '#opt-contrast', '#opt-kmeans', '#opt-smooth',
+     '#opt-max-colors', '#opt-min-region'].forEach(sel => {
+      const el = $(sel);
+      if (el) el.addEventListener('input', scheduleReprocess);
+    });
+    ['#opt-dither', '#opt-auto-size'].forEach(sel => {
+      const el = $(sel);
+      if (el) el.addEventListener('change', scheduleReprocess);
+    });
+  }
+
+  // 防抖触发重新处理
+  function scheduleReprocess() {
+    if (!lastImage) return;
+    clearTimeout(reprocessTimer);
+    reprocessTimer = setTimeout(reprocessImage, 120);
+  }
+
+  // 用当前控件参数重新转换最近一次上传的图片
+  function reprocessImage() {
+    if (!lastImage) return;
+    let cols, rows;
+    if ($('#opt-auto-size').checked) {
+      const target = parseInt($('#opt-target-size').value, 10) || 80;
+      const s = suggestSize(lastImage, target);
+      cols = s.cols; rows = s.rows;
+      $('#size-cols').value = cols;
+      $('#size-rows').value = rows;
+    } else {
+      cols = parseInt($('#size-cols').value, 10) || 64;
+      rows = parseInt($('#size-rows').value, 10) || 64;
+    }
+    const grid = imageToGrid(lastImage, cols, rows, {
+      dither: $('#opt-dither').checked,
+      contrast: parseFloat($('#opt-contrast').value) || 1.0,
+      brightness: parseInt($('#opt-brightness').value, 10) || 0,
+      kmeans:    parseInt($('#opt-kmeans').value, 10) || 0,
+      smooth:    parseInt($('#opt-smooth').value, 10) || 0,
+      maxColors: parseInt($('#opt-max-colors').value, 10) || 0,
+      minRegion: parseInt($('#opt-min-region').value, 10) || 1,
+    });
+    editor.loadGrid(grid);
   }
 
   async function handleImage(file) {
     try {
-      const img = await loadImageFile(file);
-
-      // 1. 决定目标尺寸：勾选了"自动适配"就按图片宽高比建议；否则用当前输入框
-      let cols, rows;
-      if ($('#opt-auto-size').checked) {
-        const target = parseInt($('#opt-target-size').value, 10) || 80;
-        const s = suggestSize(img, target);
-        cols = s.cols; rows = s.rows;
-        $('#size-cols').value = cols;
-        $('#size-rows').value = rows;
-      } else {
-        cols = parseInt($('#size-cols').value, 10) || 64;
-        rows = parseInt($('#size-rows').value, 10) || 64;
-      }
-
-      // 2. 转换 (box-filter + 可选 dither)
-      const grid = imageToGrid(img, cols, rows, {
-        dither: $('#opt-dither').checked,
-        contrast: parseFloat($('#opt-contrast').value) || 1.0,
-        brightness: parseInt($('#opt-brightness').value, 10) || 0,
-      });
-      editor.loadGrid(grid);
+      lastImage = await loadImageFile(file);
+      reprocessImage();
     } catch (err) {
       alert((getLang() === 'zh' ? '图片加载失败：' : 'Image load failed: ') + err.message);
     }

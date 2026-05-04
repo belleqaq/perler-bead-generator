@@ -26,6 +26,7 @@ const Exporter = {
     svg += `<rect width="${W}" height="${H}" fill="#F5EFE4"/>`;
 
     // Cells
+    const useSquare = (editor.beadShape || 'square') === 'square';
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const c = grid[y][x];
@@ -34,8 +35,14 @@ const Exporter = {
         if (c) {
           const cx = px + cell / 2;
           const cy = py + cell / 2;
-          const r = cell * 0.42;
-          svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${c.hex}" stroke="rgba(0,0,0,0.25)" stroke-width="0.6"/>`;
+          if (useSquare) {
+            const inset = 0.5;
+            svg += `<rect x="${px + inset}" y="${py + inset}" width="${cell - inset * 2}" height="${cell - inset * 2}" `
+                +  `fill="${c.hex}" stroke="rgba(0,0,0,0.2)" stroke-width="0.4"/>`;
+          } else {
+            const r = cell * 0.42;
+            svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${c.hex}" stroke="rgba(0,0,0,0.25)" stroke-width="0.6"/>`;
+          }
           if (showCodes && cell >= 14) {
             const lum = this._luminance(c.hex);
             const txtColor = lum > 0.55 ? '#222' : '#fff';

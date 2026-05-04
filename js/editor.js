@@ -13,6 +13,7 @@ class BeadEditor {
     this.tool = 'draw'; // draw | erase | fill | pick
     this.showGrid = true;
     this.showNumbers = true;
+    this.beadShape = options.beadShape || 'square'; // 'square' | 'round'
 
     this.grid = this._emptyGrid();
     this.undoStack = [];
@@ -283,21 +284,52 @@ class BeadEditor {
     const cs = this.cellSize;
     const cx = px + cs / 2;
     const cy = py + cs / 2;
-    const r  = cs * 0.43;
 
     // Base
     ctx.fillStyle = '#B8B4AC';
     ctx.fillRect(px, py, cs, cs);
 
-    if (color) {
-      // Bead body
+    if (!color) {
+      // Empty peg hole (always small dot regardless of shape)
+      ctx.beginPath();
+      ctx.arc(cx, cy, cs * 0.12, 0, Math.PI * 2);
+      ctx.fillStyle = '#A0A099';
+      ctx.fill();
+      return;
+    }
+
+    if (this.beadShape === 'square') {
+      // ── Square bead (拼好熨过的样子) ─────────────────────
+      const inset = cs >= 12 ? 0.5 : 0;
+      const sx = px + inset, sy = py + inset, sw = cs - inset * 2;
+
+      ctx.fillStyle = color.hex;
+      ctx.fillRect(sx, sy, sw, sw);
+
+      if (cs >= 10) {
+        const grad = ctx.createLinearGradient(sx, sy, sx, sy + sw);
+        grad.addColorStop(0,    'rgba(255,255,255,0.22)');
+        grad.addColorStop(0.5,  'rgba(255,255,255,0.00)');
+        grad.addColorStop(1,    'rgba(0,0,0,0.15)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(sx, sy, sw, sw);
+      }
+
+      if (cs >= 12) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(sx + 0.25, sy + 0.25, sw - 0.5, sw - 0.5);
+      }
+    } else {
+      // ── Round bead (未熨开的拼豆) ─────────────────────────
+      const r = cs * 0.43;
+
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = color.hex;
       ctx.fill();
 
       if (cs >= 10) {
-        // Sheen
         const grad = ctx.createRadialGradient(cx - r * 0.28, cy - r * 0.28, r * 0.08, cx, cy, r);
         grad.addColorStop(0, 'rgba(255,255,255,0.45)');
         grad.addColorStop(0.5, 'rgba(255,255,255,0.05)');
@@ -308,18 +340,11 @@ class BeadEditor {
         ctx.fill();
       }
 
-      // Rim
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(0,0,0,0.22)';
       ctx.lineWidth = cs >= 14 ? 0.8 : 0.5;
       ctx.stroke();
-    } else {
-      // Empty peg hole
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.28, 0, Math.PI * 2);
-      ctx.fillStyle = '#A0A099';
-      ctx.fill();
     }
   }
 

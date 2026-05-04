@@ -115,6 +115,7 @@
       <div class="btn-row" style="margin-top: 6px;">
         <button class="btn active" id="btn-grid" data-i18n="action.grid">网格</button>
         <button class="btn active" id="btn-numbers" data-i18n="action.numbers">坐标</button>
+        <button class="btn" id="btn-shape" data-i18n="action.shape">方形</button>
         <button class="btn btn-accent" id="btn-clear" data-i18n="action.clear">清空</button>
       </div>
     </section>
@@ -132,13 +133,42 @@
         <label class="img-opt-row">
           <input type="checkbox" id="opt-auto-size" checked>
           <span data-i18n="image.auto-size">自动尺寸</span>
-          <input type="number" class="input-num input-mini" id="opt-target-size" value="80" min="20" max="200" title="目标长边像素数 / Target longest side">
         </label>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.precision">精细度</span>
+          <input type="range" id="opt-target-size" min="20" max="200" value="80" step="1" title="目标长边像素数 / Target longest side">
+          <span class="slider-val" id="opt-target-size-val">80</span>
+        </div>
 
         <label class="img-opt-row">
           <input type="checkbox" id="opt-dither">
           <span data-i18n="image.dither">抖动 (保留渐变)</span>
         </label>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.smooth">平滑</span>
+          <input type="range" id="opt-smooth" min="0" max="40" value="15" step="1" title="双边滤波：保边缘地合并局部小色差；0=关">
+          <span class="slider-val" id="opt-smooth-val">15</span>
+        </div>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.kmeans">主色聚类</span>
+          <input type="range" id="opt-kmeans" min="0" max="32" value="16" step="2" title="0=关闭；越小色越少越干净">
+          <span class="slider-val" id="opt-kmeans-val">16</span>
+        </div>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.max-colors">最多色数</span>
+          <input type="range" id="opt-max-colors" min="0" max="32" value="12" step="1" title="只允许图纸里出现 N 种色号；0=关。少色更易拼。">
+          <span class="slider-val" id="opt-max-colors-val">12</span>
+        </div>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.min-region">最小色块</span>
+          <input type="range" id="opt-min-region" min="1" max="8" value="2" step="1" title="小于 N 颗的连通色块并入最大邻居；1=关。">
+          <span class="slider-val" id="opt-min-region-val">2</span>
+        </div>
 
         <div class="img-opt-row slider-row">
           <span data-i18n="image.brightness">亮度</span>
