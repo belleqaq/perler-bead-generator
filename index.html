@@ -60,13 +60,22 @@
     </section>
 
     <section class="panel">
-      <h2 class="panel-title" data-i18n="panel.palette">色板</h2>
+      <h2 class="panel-title" data-i18n="panel.palette">色板 · MARD</h2>
       <div class="current-color">
         <div class="current-color-swatch" id="current-color-swatch"></div>
         <div class="current-color-info">
-          <span class="current-color-code" id="current-color-code">H40</span>
-          <span class="current-color-name" id="current-color-name">黑色</span>
+          <span class="current-color-code" id="current-color-code">H7</span>
+          <span class="current-color-name" id="current-color-name">H7</span>
         </div>
+      </div>
+      <div class="palette-size-row">
+        <span class="palette-size-label" data-i18n="palette.size">规模</span>
+        <button class="btn btn-mini palette-size-btn" data-palette-size="221">221</button>
+        <button class="btn btn-mini palette-size-btn" data-palette-size="168">168</button>
+        <button class="btn btn-mini palette-size-btn" data-palette-size="144">144</button>
+        <button class="btn btn-mini palette-size-btn" data-palette-size="96">96</button>
+        <button class="btn btn-mini palette-size-btn" data-palette-size="48">48</button>
+        <button class="btn btn-mini palette-size-btn" data-palette-size="24">24</button>
       </div>
       <div class="palette-grid" id="palette-grid"></div>
     </section>
@@ -99,6 +108,22 @@
     </div>
   </main>
 
+  <div class="canvas-nav" aria-label="缩放与平移">
+    <div class="pan-cross">
+      <button class="pan-btn" id="pan-up"    title="上 ( ↑ )" aria-label="上">▲</button>
+      <button class="pan-btn" id="pan-left"  title="左 ( ← )" aria-label="左">◀</button>
+      <button class="pan-btn" id="pan-center" title="居中" aria-label="居中">●</button>
+      <button class="pan-btn" id="pan-right" title="右 ( → )" aria-label="右">▶</button>
+      <button class="pan-btn" id="pan-down"  title="下 ( ↓ )" aria-label="下">▼</button>
+    </div>
+    <div class="zoom-cluster">
+      <button class="zoom-btn" id="zoom-in"    title="放大 ( + )" aria-label="放大">+</button>
+      <button class="zoom-btn" id="zoom-reset" title="重置 ( 0 )" aria-label="重置">⟲</button>
+      <button class="zoom-btn" id="zoom-out"   title="缩小 ( − )" aria-label="缩小">−</button>
+      <span class="zoom-level" id="zoom-level">14</span>
+    </div>
+  </div>
+
   <!-- ═══════════════ RIGHT PANEL ═══════════════ -->
   <aside class="app-right">
 
@@ -130,10 +155,40 @@
       <input type="file" id="image-input" accept="image/*" hidden>
 
       <div class="img-opts">
+        <div class="img-opt-row">
+          <span data-i18n="image.style">风格</span>
+          <select id="opt-style" class="select-mini">
+            <option value="none"       data-i18n="image.style-none">原图</option>
+            <option value="8bit"       data-i18n="image.style-8bit">8-bit 复古</option>
+            <option value="comic"      data-i18n="image.style-comic">漫画描边</option>
+            <option value="watercolor" data-i18n="image.style-watercolor">水彩</option>
+            <option value="noir"       data-i18n="image.style-noir">单色版画</option>
+          </select>
+        </div>
+
         <label class="img-opt-row">
           <input type="checkbox" id="opt-auto-size" checked>
           <span data-i18n="image.auto-size">自动尺寸</span>
         </label>
+
+        <label class="img-opt-row">
+          <input type="checkbox" id="opt-mode-sample" checked>
+          <span data-i18n="image.mode-sample">净边采样</span>
+          <span class="img-opt-hint" data-i18n="image.mode-sample-hint" title="对卡通/线稿：让描边变成单色，不再被反走样平均成杂色阶梯。照片可以关掉。">？</span>
+        </label>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.bg-tol">去背景容差</span>
+          <input type="range" id="opt-bg-tol" min="10" max="120" value="35" step="5" title="本地 flood-fill 容差：越大越激进。">
+          <span class="slider-val" id="opt-bg-tol-val">35</span>
+        </div>
+
+        <div class="img-opt-row" style="gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-mini" id="btn-remove-bg" data-i18n="image.bg-local" disabled>本地抠图</button>
+          <button class="btn btn-mini" id="btn-remove-bg-ai" data-i18n="image.bg-ai" disabled>AI 抠图</button>
+          <button class="btn btn-mini" id="btn-restore-bg" data-i18n="image.bg-restore" disabled>还原</button>
+        </div>
+        <div class="ai-status" id="bg-status"></div>
 
         <div class="img-opt-row slider-row">
           <span data-i18n="image.precision">精细度</span>
@@ -148,26 +203,26 @@
 
         <div class="img-opt-row slider-row">
           <span data-i18n="image.smooth">平滑</span>
-          <input type="range" id="opt-smooth" min="0" max="40" value="15" step="1" title="双边滤波：保边缘地合并局部小色差；0=关">
-          <span class="slider-val" id="opt-smooth-val">15</span>
+          <input type="range" id="opt-smooth" min="0" max="40" value="0" step="1" title="双边滤波：保边缘地合并局部小色差；0=关">
+          <span class="slider-val" id="opt-smooth-val">关</span>
         </div>
 
         <div class="img-opt-row slider-row">
           <span data-i18n="image.kmeans">主色聚类</span>
-          <input type="range" id="opt-kmeans" min="0" max="32" value="16" step="2" title="0=关闭；越小色越少越干净">
-          <span class="slider-val" id="opt-kmeans-val">16</span>
+          <input type="range" id="opt-kmeans" min="0" max="32" value="0" step="2" title="0=关闭；越小色越少越干净">
+          <span class="slider-val" id="opt-kmeans-val">关</span>
         </div>
 
         <div class="img-opt-row slider-row">
           <span data-i18n="image.max-colors">最多色数</span>
-          <input type="range" id="opt-max-colors" min="0" max="32" value="12" step="1" title="只允许图纸里出现 N 种色号；0=关。少色更易拼。">
-          <span class="slider-val" id="opt-max-colors-val">12</span>
+          <input type="range" id="opt-max-colors" min="0" max="64" value="0" step="1" title="只允许图纸里出现 N 种色号；0=关。少色更易拼。">
+          <span class="slider-val" id="opt-max-colors-val">关</span>
         </div>
 
         <div class="img-opt-row slider-row">
           <span data-i18n="image.min-region">最小色块</span>
-          <input type="range" id="opt-min-region" min="1" max="8" value="2" step="1" title="小于 N 颗的连通色块并入最大邻居；1=关。">
-          <span class="slider-val" id="opt-min-region-val">2</span>
+          <input type="range" id="opt-min-region" min="1" max="8" value="1" step="1" title="小于 N 颗的连通色块并入最大邻居；1=关。">
+          <span class="slider-val" id="opt-min-region-val">关</span>
         </div>
 
         <div class="img-opt-row slider-row">
@@ -182,6 +237,39 @@
           <span class="slider-val" id="opt-contrast-val">1.0</span>
         </div>
       </div>
+
+      <details class="ai-block">
+        <summary data-i18n="ai.title">AI 真人转卡通（高级）</summary>
+        <div class="ai-body">
+          <div class="ai-hint" data-i18n="ai.hint">把照片先用生成式 AI 改成像素卡通画再做成图纸。需要 fal.ai API Key（注册见 fal.ai/dashboard/keys）。</div>
+
+          <div class="img-opt-row">
+            <span data-i18n="ai.key">API Key</span>
+            <input type="password" id="ai-key" class="input-text" placeholder="fal_xxxxxxxx" autocomplete="off">
+          </div>
+
+          <div class="img-opt-row">
+            <span data-i18n="ai.style">风格</span>
+            <select id="ai-style" class="select-mini">
+              <option value="pixel"     data-i18n="ai.style-pixel">像素艺术</option>
+              <option value="stardew"   data-i18n="ai.style-stardew">Stardew Valley</option>
+              <option value="terraria"  data-i18n="ai.style-terraria">Terraria</option>
+              <option value="8bit-game" data-i18n="ai.style-8bit-game">8-bit 游戏</option>
+              <option value="anime"     data-i18n="ai.style-anime">日系动漫</option>
+              <option value="ghibli"    data-i18n="ai.style-ghibli">吉卜力</option>
+            </select>
+          </div>
+
+          <div class="img-opt-row slider-row">
+            <span data-i18n="ai.strength">改造强度</span>
+            <input type="range" id="ai-strength" min="0.5" max="0.95" value="0.85" step="0.05">
+            <span class="slider-val" id="ai-strength-val">0.85</span>
+          </div>
+
+          <button class="btn btn-primary" id="ai-generate" data-i18n="ai.generate" disabled>生成卡通版</button>
+          <div class="ai-status" id="ai-status"></div>
+        </div>
+      </details>
     </section>
 
     <section class="panel">

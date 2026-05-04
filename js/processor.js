@@ -13,11 +13,11 @@
  * @param {HTMLImageElement} img
  * @param {number} cols
  * @param {number} rows
- * @param {Object} opts { palette, dither, contrast, brightness, kmeans, smooth }
+ * @param {Object} opts { palette, dither, contrast, brightness, kmeans, smooth, maxColors, minRegion, style }
  * @returns {Array<Array>} 2D grid
  */
 function imageToGrid(img, cols, rows, opts = {}) {
-  const palette  = opts.palette  || HAMA_PALETTE;
+  const palette  = opts.palette  || MARD_PALETTE;
   const dither   = opts.dither   ?? false;
   const contrast = opts.contrast ?? 1.0;     // 1.0 = no change
   const brightness = opts.brightness ?? 0;   // -100 ~ 100
@@ -25,6 +25,8 @@ function imageToGrid(img, cols, rows, opts = {}) {
   const smooth     = opts.smooth     ?? 0;   // 0 = 关闭；越大越激进地把局部小色差合并（双边滤波 σc）
   const maxColors  = opts.maxColors  ?? 0;   // 0 = 关闭；否则最终图纸只允许 ≤ N 种色号
   const minRegion  = opts.minRegion  ?? 1;   // ≤1 = 关闭；否则连通色块 < N 颗的并入最大邻居
+  const style      = opts.style      || 'none'; // 'none' | '8bit' | 'comic' | 'watercolor' | 'noir'
+  const sampling   = opts.sampling   || 'mode'; // 'mode' = 投票（净边） | 'mean' = 平均（旧）
 
   // ── Step 1. 画到原图全分辨率离屏 canvas ──────────────────
   const src = document.createElement('canvas');
@@ -35,10 +37,13 @@ function imageToGrid(img, cols, rows, opts = {}) {
   sctx.drawImage(img, 0, 0);
   const srcData = sctx.getImageData(0, 0, src.width, src.height).data;
 
-  // ── Step 2. 用 box-filter 把全图采样到 cols × rows ──────
-  // 每个目标格子覆盖原图的一块区域，对该区域所有像素 RGB 取平均
-  const buf = new Float32Array(cols * rows * 4); // r,g,b,a 累加
+  // ── Step 2. 把全图采样到 cols × rows ───────────────────
+  // sampling = 'mode'（默认）：投票——每格按 4 位/通道分桶，取最大桶的均值。
+  //                            描边/线稿单色化、避免反走样混色。
+  // sampling = 'mean'：传统 box-filter 平均，平滑照片好但会"晕染"边缘。
+  const buf = new Float32Array(cols * rows * 4);
   const W = src.width, H = src.height;
+  const useMode = sampling === 'mode';
 
   for (let py = 0; py < rows; py++) {
     const y0 = Math.floor(py * H / rows);
@@ -46,23 +51,25 @@ function imageToGrid(img, cols, rows, opts = {}) {
     for (let px = 0; px < cols; px++) {
       const x0 = Math.floor(px * W / cols);
       const x1 = Math.max(x0 + 1, Math.floor((px + 1) * W / cols));
-
-      let r = 0, g = 0, b = 0, a = 0, n = 0;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const i = (y * W + x) * 4;
-          r += srcData[i];
-          g += srcData[i + 1];
-          b += srcData[i + 2];
-          a += srcData[i + 3];
-          n++;
-        }
-      }
       const k = (py * cols + px) * 4;
-      buf[k]     = r / n;
-      buf[k + 1] = g / n;
-      buf[k + 2] = b / n;
-      buf[k + 3] = a / n;
+
+      if (useMode) {
+        const [r, g, b, a] = sampleCellMode(srcData, W, x0, y0, x1, y1);
+        buf[k] = r; buf[k + 1] = g; buf[k + 2] = b; buf[k + 3] = a;
+      } else {
+        let r = 0, g = 0, b = 0, a = 0, n = 0;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (y * W + x) * 4;
+            r += srcData[i];
+            g += srcData[i + 1];
+            b += srcData[i + 2];
+            a += srcData[i + 3];
+            n++;
+          }
+        }
+        buf[k] = r / n; buf[k + 1] = g / n; buf[k + 2] = b / n; buf[k + 3] = a / n;
+      }
     }
   }
 
@@ -75,6 +82,11 @@ function imageToGrid(img, cols, rows, opts = {}) {
         buf[i + c] = Math.max(0, Math.min(255, v));
       }
     }
+  }
+
+  // ── Step 3.2 风格化预设（8-bit/漫画描边/水彩/黑白）──────
+  if (style && style !== 'none') {
+    applyStyle(buf, cols, rows, style);
   }
 
   // ── Step 3.4 双边滤波：把孤立的高光/杂色拉回邻域均值，但保留真实边缘 ──
@@ -406,6 +418,143 @@ function loadImageFile(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * 模式采样（净边采样）：把格子里的源像素按 4 位/通道（16³=4096 桶）分桶，
+ * 取像素数最多那个桶的均值作为格子颜色。透明度走原始平均（避免边缘抖动）。
+ *
+ * 为什么 mode 解决"卡通描边变成杂色阶梯"：
+ *   边缘格 60% 白 + 40% 黑 → 白桶赢 → 格子白；下一格 40% 白 + 60% 黑 → 黑桶赢 → 格子黑
+ *   描边整条单色，不再被反走样像素平均成各种"米/灰/褐"。
+ *
+ * "暗少数派救援"：只挑最多桶会丢小特征——粗格子里嘴/眼/细轮廓只占 5-10%
+ * 像素，会被白色背景压死。规则：当主胜方很亮（>180）且某个少数桶
+ *   1) 比主胜方暗 ≥50 亮度
+ *   2) saliency 分数 = 面积比 × √(亮度落差/200) ≥ 0.04
+ * 就改用那个深色桶。这样嘴/眼/线条在低精细度下也能保住。
+ */
+function sampleCellMode(srcData, W, x0, y0, x1, y1) {
+  const bins = new Map(); // 12-bit key (4 bits per channel) → [r, g, b, n]
+  let sumA = 0, totalN = 0, validN = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * W + x) * 4;
+      const r = srcData[i], g = srcData[i + 1], b = srcData[i + 2], a = srcData[i + 3];
+      sumA += a;
+      totalN++;
+      if (a < 64) continue;
+      validN++;
+      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+      const bin = bins.get(key);
+      if (bin) { bin[0] += r; bin[1] += g; bin[2] += b; bin[3]++; }
+      else     { bins.set(key, [r, g, b, 1]); }
+    }
+  }
+  const avgA = totalN ? sumA / totalN : 0;
+  if (bins.size === 0) return [0, 0, 0, avgA];
+
+  // 主胜方
+  let winner = null, winnerN = 0;
+  bins.forEach(bin => { if (bin[3] > winnerN) { winnerN = bin[3]; winner = bin; } });
+
+  // 暗少数派救援：仅当主胜方是浅色（背景/填充）才触发
+  const winnerBright = (winner[0] + winner[1] + winner[2]) / (3 * winner[3]);
+  if (winnerBright > 180 && validN > 0) {
+    let bestDark = null, bestScore = 0;
+    bins.forEach(bin => {
+      if (bin === winner) return;
+      const bright = (bin[0] + bin[1] + bin[2]) / (3 * bin[3]);
+      const drop = winnerBright - bright;
+      if (drop < 50) return;                         // 必须明显暗
+      const pct = bin[3] / validN;
+      const score = pct * Math.sqrt(drop / 200);
+      if (score > 0.04 && score > bestScore) { bestScore = score; bestDark = bin; }
+    });
+    if (bestDark) winner = bestDark;
+  }
+
+  return [winner[0] / winner[3], winner[1] / winner[3], winner[2] / winner[3], avgA];
+}
+
+/**
+ * 风格化预设：在量化前对降采样后的图像做艺术化变形。
+ * 不会真的把照片变成 Stardew，但能给照片加明显的"卡通/复古"味道。
+ */
+function applyStyle(buf, cols, rows, style) {
+  switch (style) {
+    case '8bit':       // 复古 8-bit：极少色阶 + 高饱和
+      posterize(buf, 4);
+      adjustSaturation(buf, 1.45);
+      break;
+    case 'comic':      // 漫画描边：海报化 + Sobel 黑色描边
+      adjustSaturation(buf, 1.2);
+      posterize(buf, 5);
+      sobelOutline(buf, cols, rows, 70);
+      break;
+    case 'watercolor': // 水彩：强双边平滑 + 略降饱和
+      bilateralSmooth(buf, cols, rows, 35, 3);
+      adjustSaturation(buf, 0.85);
+      posterize(buf, 6);
+      break;
+    case 'noir':       // 单色版画：去饱和 + 二值化描边
+      adjustSaturation(buf, 0.0);
+      posterize(buf, 3);
+      sobelOutline(buf, cols, rows, 50);
+      break;
+  }
+}
+
+/**
+ * 海报化：每个通道压缩到 levels 个色阶。levels 越小越"卡通"。
+ */
+function posterize(buf, levels) {
+  const step = 255 / (levels - 1);
+  for (let i = 0; i < buf.length; i += 4) {
+    if (buf[i + 3] < 64) continue;
+    buf[i]     = Math.round(buf[i]     / step) * step;
+    buf[i + 1] = Math.round(buf[i + 1] / step) * step;
+    buf[i + 2] = Math.round(buf[i + 2] / step) * step;
+  }
+}
+
+/**
+ * 调整饱和度。factor=1 不变；>1 更艳；0 = 黑白。
+ */
+function adjustSaturation(buf, factor) {
+  for (let i = 0; i < buf.length; i += 4) {
+    if (buf[i + 3] < 64) continue;
+    const r = buf[i], g = buf[i + 1], b = buf[i + 2];
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    buf[i]     = Math.max(0, Math.min(255, gray + (r - gray) * factor));
+    buf[i + 1] = Math.max(0, Math.min(255, gray + (g - gray) * factor));
+    buf[i + 2] = Math.max(0, Math.min(255, gray + (b - gray) * factor));
+  }
+}
+
+/**
+ * Sobel 边缘检测：超过阈值的像素直接涂黑，做"描边"效果。
+ */
+function sobelOutline(buf, cols, rows, threshold) {
+  const gray = new Float32Array(cols * rows);
+  for (let i = 0, k = 0; i < buf.length; i += 4, k++) {
+    gray[k] = 0.299 * buf[i] + 0.587 * buf[i + 1] + 0.114 * buf[i + 2];
+  }
+  const edges = new Uint8Array(cols * rows);
+  for (let y = 1; y < rows - 1; y++) {
+    for (let x = 1; x < cols - 1; x++) {
+      const i = y * cols + x;
+      const tl = gray[i - cols - 1], tc = gray[i - cols], tr = gray[i - cols + 1];
+      const ml = gray[i - 1],                              mr = gray[i + 1];
+      const bl = gray[i + cols - 1], bc = gray[i + cols], br = gray[i + cols + 1];
+      const gx = -tl - 2 * ml - bl + tr + 2 * mr + br;
+      const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
+      if (Math.sqrt(gx * gx + gy * gy) > threshold) edges[i] = 1;
+    }
+  }
+  for (let i = 0, k = 0; i < buf.length; i += 4, k++) {
+    if (edges[k]) { buf[i] = 0; buf[i + 1] = 0; buf[i + 2] = 0; }
+  }
 }
 
 /**

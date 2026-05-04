@@ -104,7 +104,7 @@ const Exporter = {
           const data = JSON.parse(e.target.result);
           if (!data.grid || !Array.isArray(data.grid)) throw new Error('Invalid project');
           const grid = data.grid.map(row =>
-            row.map(code => code ? HAMA_PALETTE.find(c => c.code === code) || null : null)
+            row.map(code => code ? findColorByCode(code) : null)
           );
           editor.loadGrid(grid);
           resolve(data);

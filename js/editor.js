@@ -9,7 +9,7 @@ class BeadEditor {
     this.cellSize = options.cellSize || 20;
     this.cols = options.cols || 29;
     this.rows = options.rows || 29;
-    this.currentColor = HAMA_PALETTE[39]; // 默认黑色
+    this.currentColor = findColorByCode('H7') || MARD_PALETTE[0]; // 默认黑色
     this.tool = 'draw'; // draw | erase | fill | pick
     this.showGrid = true;
     this.showNumbers = true;
@@ -23,8 +23,36 @@ class BeadEditor {
     this._isDrawing = false;
     this._lastCell = null;
 
+    // 视窗：当 cellSize 大到画板装不下时，只渲染视窗内的格子，由用户平移
+    this.viewX = 0;
+    this.viewY = 0;
+    this.displayW = 720;
+    this.displayH = 720;
+    this._renderFullGrid = false; // 给 renderToCanvas 用的逃生口
+    this._panAccumX = 0;          // 触控板两指平移的亚格累加器
+    this._panAccumY = 0;
+
     this._bindEvents();
+    this._observeContainer();
     this.render();
+  }
+
+  _observeContainer() {
+    const main = this.canvas.closest('.app-main');
+    if (!main || typeof ResizeObserver === 'undefined') return;
+    const update = () => {
+      const s = getComputedStyle(main);
+      const padX = parseInt(s.paddingLeft) + parseInt(s.paddingRight);
+      const padY = parseInt(s.paddingTop) + parseInt(s.paddingBottom);
+      const frame = this.canvas.closest('.canvas-frame');
+      const fp = frame ? parseInt(getComputedStyle(frame).padding) || 18 : 0;
+      this.displayW = Math.max(240, main.clientWidth  - padX - fp * 2 - 8);
+      this.displayH = Math.max(240, main.clientHeight - padY - fp * 2 - 8);
+      this._clampView();
+      this.render();
+    };
+    new ResizeObserver(update).observe(main);
+    update();
   }
 
   // ─── 网格管理 ────────────────────────────────────────────────
@@ -38,7 +66,7 @@ class BeadEditor {
     this.rows = grid.length;
     this.cols = grid[0].length;
     this.grid = grid.map(row => [...row]);
-    this.render();
+    this.fitToView();   // 新图先全显示，用户再放大改细节
     this._emit('gridChanged');
   }
 
@@ -52,8 +80,16 @@ class BeadEditor {
     this.cols = cols;
     this.rows = rows;
     this.grid = newGrid;
+    this._clampCellSize();
+    this.viewX = 0; this.viewY = 0;
+    this._clampView();
     this.render();
     this._emit('gridChanged');
+  }
+
+  _clampCellSize() {
+    const cap = this.maxCellSize;
+    if (this.cellSize > cap) this.cellSize = cap;
   }
 
   clear() {
@@ -62,6 +98,111 @@ class BeadEditor {
     this.render();
     this._emit('gridChanged');
   }
+
+  // ─── 缩放 + 平移 ─────────────────────────────────────────────
+  // 现在画布大小由视窗 (displayW × displayH) 决定，cellSize 大了不会让画布
+  // 撑爆——只是让一屏看到的格子变少。所以上限解除得很大（每格半个手掌）。
+  static MIN_CELL = 3;
+  static MAX_CELL = 200;
+  static DEFAULT_CELL = 14;
+
+  get maxCellSize() { return BeadEditor.MAX_CELL; }
+
+  zoom(delta)        { this.zoomAt(this.cellSize + delta); }   // 中心锚点
+  setCellSize(n)     { this.zoomAt(n); }                       // 中心锚点
+
+  /**
+   * 以指定屏幕点为锚点缩放——锚点在屏幕上的位置不变，view 自动平移。
+   * 屏幕坐标 anchorScreenX/Y 是 canvas 像素坐标（已含 CSS scale），从 canvas 左上角算。
+   * 没传 / 在 canvas 外 → 退回到 canvas 内容中心为锚点。
+   */
+  zoomAt(newSize, anchorScreenX, anchorScreenY) {
+    newSize = Math.max(BeadEditor.MIN_CELL, Math.min(BeadEditor.MAX_CELL, newSize));
+    if (newSize === this.cellSize) return;
+    const MARGIN = this.showNumbers ? 24 : 0;
+
+    const inside = anchorScreenX !== undefined && anchorScreenY !== undefined
+                && anchorScreenX >= 0 && anchorScreenX <= this.canvas.width
+                && anchorScreenY >= 0 && anchorScreenY <= this.canvas.height;
+    if (!inside) {
+      // 默认：当前可视内容中心
+      const v = this._visibleCells();
+      anchorScreenX = MARGIN + Math.min(v.c, this.cols - this.viewX) * this.cellSize / 2;
+      anchorScreenY = MARGIN + Math.min(v.r, this.rows - this.viewY) * this.cellSize / 2;
+    }
+    const ax = Math.max(0, anchorScreenX - MARGIN);
+    const ay = Math.max(0, anchorScreenY - MARGIN);
+    // 锚点对应的（连续）格子坐标
+    const gridX = this.viewX + ax / this.cellSize;
+    const gridY = this.viewY + ay / this.cellSize;
+    this.cellSize = newSize;
+    // 让同一格子坐标在新尺寸下落回同一屏幕像素
+    this.viewX = Math.round(gridX - ax / newSize);
+    this.viewY = Math.round(gridY - ay / newSize);
+    this._clampView();
+    this.render();
+    this._emit('zoomChanged');
+  }
+
+  pan(dx, dy) {
+    if (!dx && !dy) return;
+    this.viewX += dx;
+    this.viewY += dy;
+    this._clampView();
+    this.render();
+    this._emit('viewChanged');
+  }
+
+  centerView() {
+    const v = this._visibleCells();
+    this.viewX = Math.max(0, Math.floor((this.cols - v.c) / 2));
+    this.viewY = Math.max(0, Math.floor((this.rows - v.r) / 2));
+    this.render();
+    this._emit('viewChanged');
+  }
+
+  /**
+   * 把 cellSize 自适应成"整张图纸刚好能装进视窗"——
+   * cols × cs ≤ 可用宽，rows × cs ≤ 可用高。
+   * 用于刚载入图纸时让用户先看到完整图，再决定是否放大局部。
+   * 视窗归零（已经全显示完了，原点就是居中）。
+   */
+  fitToView() {
+    const MARGIN = this.showNumbers ? 24 : 0;
+    const csW = Math.floor((this.displayW - MARGIN) / this.cols);
+    const csH = Math.floor((this.displayH - MARGIN) / this.rows);
+    const fit = Math.max(BeadEditor.MIN_CELL,
+                Math.min(BeadEditor.MAX_CELL, Math.min(csW, csH)));
+    this.cellSize = fit;
+    this.viewX = 0;
+    this.viewY = 0;
+    this.render();
+    this._emit('zoomChanged');
+  }
+
+  _visibleCells() {
+    const MARGIN = this.showNumbers ? 24 : 0;
+    return {
+      c: Math.max(1, Math.floor((this.displayW - MARGIN) / this.cellSize)),
+      r: Math.max(1, Math.floor((this.displayH - MARGIN) / this.cellSize)),
+    };
+  }
+
+  _clampView() {
+    const v = this._visibleCells();
+    const maxX = Math.max(0, this.cols - v.c);
+    const maxY = Math.max(0, this.rows - v.r);
+    if (this.viewX > maxX) this.viewX = maxX;
+    if (this.viewY > maxY) this.viewY = maxY;
+    if (this.viewX < 0) this.viewX = 0;
+    if (this.viewY < 0) this.viewY = 0;
+  }
+
+  // 当前可平移信息（给 UI 用来 disable 按钮）
+  get canPanLeft()  { return this.viewX > 0; }
+  get canPanRight() { return this.viewX + this._visibleCells().c < this.cols; }
+  get canPanUp()    { return this.viewY > 0; }
+  get canPanDown()  { return this.viewY + this._visibleCells().r < this.rows; }
 
   // ─── 撤销/重做 ───────────────────────────────────────────────
 
@@ -100,7 +241,7 @@ class BeadEditor {
   _deserialize({ rows, cols, grid }) {
     this.rows = rows; this.cols = cols;
     this.grid = grid.map(row =>
-      row.map(code => code ? HAMA_PALETTE.find(c => c.code === code) || null : null)
+      row.map(code => code ? findColorByCode(code) : null)
     );
   }
 
@@ -157,8 +298,8 @@ class BeadEditor {
       const s = this.canvas.width / r.width;
       const MARGIN = this.showNumbers ? 24 : 0;
       return {
-        x: Math.floor(((e.clientX - r.left) * s - MARGIN) / this.cellSize),
-        y: Math.floor(((e.clientY - r.top)  * s - MARGIN) / this.cellSize),
+        x: this.viewX + Math.floor(((e.clientX - r.left) * s - MARGIN) / this.cellSize),
+        y: this.viewY + Math.floor(((e.clientY - r.top)  * s - MARGIN) / this.cellSize),
       };
     };
 
@@ -168,8 +309,8 @@ class BeadEditor {
       const s = this.canvas.width / r.width;
       const MARGIN = this.showNumbers ? 24 : 0;
       return {
-        x: Math.floor(((t.clientX - r.left) * s - MARGIN) / this.cellSize),
-        y: Math.floor(((t.clientY - r.top)  * s - MARGIN) / this.cellSize),
+        x: this.viewX + Math.floor(((t.clientX - r.left) * s - MARGIN) / this.cellSize),
+        y: this.viewY + Math.floor(((t.clientY - r.top)  * s - MARGIN) / this.cellSize),
       };
     };
 
@@ -220,6 +361,35 @@ class BeadEditor {
         e.preventDefault(); this.redo();
       }
     });
+
+    // ── 触控板两指手势：滑动 = 平移视窗，捏合 = 缩放 ──────
+    // 浏览器把两指捏合 emit 成 wheel 事件 + ctrlKey=true（Chrome/Safari/Firefox 都这么做）
+    // 普通两指滑动是 wheel 事件 + ctrlKey=false，deltaX/Y 是滑动距离（像素）。
+    const wheelTarget = this.canvas.closest('.app-main') || this.canvas;
+    wheelTarget.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.ctrlKey) {
+        // 捏合缩放：multiplicative，捏开 → cellSize 变大；以光标位置为锚点
+        const rect = this.canvas.getBoundingClientRect();
+        const scale = this.canvas.width / rect.width;
+        const ax = (e.clientX - rect.left) * scale;
+        const ay = (e.clientY - rect.top)  * scale;
+        const factor = 1 - e.deltaY * 0.012;
+        const next = Math.round(this.cellSize * factor);
+        if (next !== this.cellSize) this.zoomAt(next, ax, ay);
+      } else {
+        // 两指滑动平移：累加亚格分量，跨过整数才推动一格
+        this._panAccumX += e.deltaX / this.cellSize;
+        this._panAccumY += e.deltaY / this.cellSize;
+        const dx = Math.trunc(this._panAccumX);
+        const dy = Math.trunc(this._panAccumY);
+        if (dx || dy) {
+          this._panAccumX -= dx;
+          this._panAccumY -= dy;
+          this.pan(dx, dy);
+        }
+      }
+    }, { passive: false });
   }
 
   // ─── 渲染 ────────────────────────────────────────────────────
@@ -227,8 +397,20 @@ class BeadEditor {
   render() {
     const { ctx, cellSize, cols, rows } = this;
     const MARGIN = this.showNumbers ? 24 : 0;
-    const W = cols * cellSize + MARGIN;
-    const H = rows * cellSize + MARGIN;
+
+    // 决定要画的范围：导出时画整张；普通时只画视窗内
+    let originX, originY, viewC, viewR;
+    if (this._renderFullGrid) {
+      originX = 0; originY = 0; viewC = cols; viewR = rows;
+    } else {
+      const v = this._visibleCells();
+      viewC = Math.min(cols, v.c);
+      viewR = Math.min(rows, v.r);
+      originX = this.viewX;
+      originY = this.viewY;
+    }
+    const W = viewC * cellSize + MARGIN;
+    const H = viewR * cellSize + MARGIN;
 
     this.canvas.width  = W;
     this.canvas.height = H;
@@ -237,44 +419,54 @@ class BeadEditor {
     ctx.fillStyle = '#C8C4BC';
     ctx.fillRect(0, 0, W, H);
 
-    // Number labels
+    // Number labels（用绝对格子坐标）
     if (this.showNumbers) {
       ctx.fillStyle = '#6B6560';
       ctx.font = `${Math.max(9, Math.min(12, cellSize * 0.55))}px "Space Mono", monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      for (let x = 0; x < cols; x += 5) {
-        ctx.fillText(x + 1, MARGIN + x * cellSize + cellSize / 2, MARGIN / 2);
+      const xStart = Math.ceil(originX / 5) * 5;
+      for (let gx = xStart; gx < originX + viewC; gx += 5) {
+        const localX = gx - originX;
+        ctx.fillText(gx + 1, MARGIN + localX * cellSize + cellSize / 2, MARGIN / 2);
       }
       ctx.textAlign = 'right';
-      for (let y = 0; y < rows; y += 5) {
-        ctx.fillText(y + 1, MARGIN - 3, MARGIN + y * cellSize + cellSize / 2);
+      const yStart = Math.ceil(originY / 5) * 5;
+      for (let gy = yStart; gy < originY + viewR; gy += 5) {
+        const localY = gy - originY;
+        ctx.fillText(gy + 1, MARGIN - 3, MARGIN + localY * cellSize + cellSize / 2);
       }
     }
 
     // Cells
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        this._renderBead(ctx, MARGIN + x * cellSize, MARGIN + y * cellSize, this.grid[y][x]);
+    for (let ly = 0; ly < viewR; ly++) {
+      const gy = originY + ly;
+      if (gy < 0 || gy >= rows) continue;
+      for (let lx = 0; lx < viewC; lx++) {
+        const gx = originX + lx;
+        if (gx < 0 || gx >= cols) continue;
+        this._renderBead(ctx, MARGIN + lx * cellSize, MARGIN + ly * cellSize, this.grid[gy][gx]);
       }
     }
 
     // Grid lines
     if (this.showGrid && cellSize >= 8) {
-      for (let x = 0; x <= cols; x++) {
-        ctx.strokeStyle = x % 5 === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.10)';
-        ctx.lineWidth   = x % 5 === 0 ? 1 : 0.5;
+      for (let x = 0; x <= viewC; x++) {
+        const absX = originX + x;
+        ctx.strokeStyle = absX % 5 === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.10)';
+        ctx.lineWidth   = absX % 5 === 0 ? 1 : 0.5;
         ctx.beginPath();
         ctx.moveTo(MARGIN + x * cellSize, MARGIN);
-        ctx.lineTo(MARGIN + x * cellSize, MARGIN + rows * cellSize);
+        ctx.lineTo(MARGIN + x * cellSize, MARGIN + viewR * cellSize);
         ctx.stroke();
       }
-      for (let y = 0; y <= rows; y++) {
-        ctx.strokeStyle = y % 5 === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.10)';
-        ctx.lineWidth   = y % 5 === 0 ? 1 : 0.5;
+      for (let y = 0; y <= viewR; y++) {
+        const absY = originY + y;
+        ctx.strokeStyle = absY % 5 === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.10)';
+        ctx.lineWidth   = absY % 5 === 0 ? 1 : 0.5;
         ctx.beginPath();
         ctx.moveTo(MARGIN, MARGIN + y * cellSize);
-        ctx.lineTo(MARGIN + cols * cellSize, MARGIN + y * cellSize);
+        ctx.lineTo(MARGIN + viewC * cellSize, MARGIN + y * cellSize);
         ctx.stroke();
       }
     }
@@ -388,7 +580,9 @@ class BeadEditor {
     this.ctx = octx;
     this.cellSize = cellSize;
     this.showNumbers = false;
+    this._renderFullGrid = true;
     this.render();
+    this._renderFullGrid = false;
 
     // Restore
     this.canvas = savedCanvas;
