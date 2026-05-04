@@ -693,6 +693,7 @@
   // ─── 导出 ────────────────────────────────────────────────────
   function bindExport() {
     $('#exp-png').addEventListener('click', () => Exporter.exportPNG(editor));
+    $('#exp-png-pixel').addEventListener('click', () => Exporter.exportPNGPixelArt(editor));
     $('#exp-svg').addEventListener('click', () => Exporter.exportSVG(editor));
     $('#exp-print').addEventListener('click', () => Exporter.printPattern(editor, getExportOpts()));
     $('#exp-pdf').addEventListener('click', () => Exporter.exportPDF(editor, getExportOpts()));

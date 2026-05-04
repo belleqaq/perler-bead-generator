@@ -12,6 +12,30 @@ const Exporter = {
     }, 'image/png');
   },
 
+  /**
+   * 像素画 PNG：每格 = 一块纯色方块，无网格、无坐标、无珠样、无背景（透明）。
+   * 适合贴 Discord/社交/二次创作。空格保持透明。
+   * 输出尺寸：每格 16px（32×32 图纸 → 512×512；100×100 → 1600×1600）。
+   */
+  exportPNGPixelArt(editor, filename = 'pattern-pixel.png') {
+    const SCALE = 16;
+    const { cols, rows, grid } = editor;
+    const c = document.createElement('canvas');
+    c.width  = cols * SCALE;
+    c.height = rows * SCALE;
+    const ctx = c.getContext('2d');
+    // 透明背景：不调 fillRect 全屏，跳过空格即可
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const cell = grid[y][x];
+        if (!cell) continue;
+        ctx.fillStyle = cell.hex;
+        ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
+      }
+    }
+    c.toBlob(blob => this._download(blob, filename), 'image/png');
+  },
+
   // ─── SVG ──────────────────────────────────────────────────
   exportSVG(editor, filename = 'pattern.svg', opts = {}) {
     const cell = opts.cell || 20;

@@ -84,6 +84,7 @@ const I18N = {
     'image.contrast': '对比度',
 
     'export.png': '导出 PNG',
+    'export.png-pixel': '导出像素画 PNG',
     'export.svg': '导出 SVG',
     'export.pdf-print': '打印图纸',
     'export.pdf-file': '导出 PDF',
@@ -192,6 +193,7 @@ const I18N = {
     'image.contrast': 'Contrast',
 
     'export.png': 'Export PNG',
+    'export.png-pixel': 'Export pixel-art PNG',
     'export.svg': 'Export SVG',
     'export.pdf-print': 'Print Pattern',
     'export.pdf-file': 'Export PDF',
