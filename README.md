@@ -30,25 +30,51 @@
 
 ---
 
-## 🚀 Quick Start · 快速开始
+## 🚀 Quick Start · 怎么打开用
 
-### Option 1 — 直接打开
+### 🌟 最简单：直接在浏览器里用（推荐给所有朋友）
+
+打开这个链接就能用，**不用下载、不用安装任何东西**：
+
+**👉 https://belleqaq.github.io/perler-bead-generator/**
+
+直接在 Chrome / Safari / Edge 里打开就可以。手机也能用，但电脑上体验更好（屏幕大、能拖图片）。
+
+> 💡 第一次打开如果是 404，是因为 GitHub Pages 还没启用。仓库管理员（belleqaq）在 GitHub 网页操作一次：
+> Repo 页 → **Settings** → 左边栏 **Pages** → Source 选 `main` 分支、`/ (root)` 文件夹 → Save。等 1–2 分钟链接就能用了。
+
+---
+
+### 💾 想离线用 / 想留一份在电脑上
+
+1. 打开 https://github.com/belleqaq/perler-bead-generator
+2. 点绿色的 **`<> Code`** 按钮 → 选 **Download ZIP**
+3. 解压下载的 zip 文件
+4. **双击里面的 `index.html`** —— 浏览器就会打开它
+
+整个工具就跑在你浏览器本地，不联网（除了 PDF 导出会从 CDN 加载一个小工具库 jsPDF；想完全离线可以把 jsPDF 也下载下来放本地）。
+
+> 个别浏览器（Chrome 比较严）打开本地 `.html` 时会限制图片读取。如果上传图片不工作，最简单的补救：把项目文件夹拖进 VSCode 的 Live Server 插件，或者直接用上面的在线链接。
+
+---
+
+### 🛠 给开发者 · For developers
+
 ```bash
-git clone https://github.com/<your-username>/perler-bead-generator.git
+git clone https://github.com/belleqaq/perler-bead-generator.git
 cd perler-bead-generator
-open index.html        # macOS
+python3 -m http.server 8000     # → http://localhost:8000
+# 或者 npx serve 等任意静态服务器都行
 ```
 
-### Option 2 — 本地服务器（图片转换推荐）
-```bash
-python3 -m http.server 8000
-# → http://localhost:8000
-```
+无构建步骤、无 npm 依赖。改完 JS/CSS 直接刷新浏览器。
 
-### Option 3 — Deploy to GitHub Pages
-1. Push to GitHub
-2. Repository → **Settings** → **Pages** → Source: `main` / root
-3. Visit `https://<your-username>.github.io/perler-bead-generator/`
+---
+
+### 🤖 AI 功能要不要 Key？
+
+- **不需要**：手绘、上传图片自动转图纸、所有 220+ 色板切换、缩放平移、PNG/SVG/PDF 导出 —— 都不需要任何账号
+- **需要**：「AI 真人转卡通」「AI 抠图」 —— 这两个会调 fal.ai 的服务，要自己去 https://fal.ai/dashboard/keys 注册一个 API Key 贴进去（按张计费，约 $0.005–0.05 一张）。**完全不用也行，普通功能已经够拼图纸了**
 
 ---
 
