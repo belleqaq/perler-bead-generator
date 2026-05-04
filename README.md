@@ -105,6 +105,10 @@ perler-bead-generator/
 ### Keyboard shortcuts · 快捷键
 | Key | Action |
 | --- | --- |
+| `B` | 切换到绘制 / Brush |
+| `E` | 切换到橡皮 / Erase |
+| `G` | 切换到填充 / Fill (Paint Bucket) |
+| `I` | 切换到取色 / Eyedropper |
 | `Ctrl/Cmd + Z` | Undo |
 | `Ctrl/Cmd + Y` / `Ctrl/Cmd + Shift + Z` | Redo |
 | `+` / `=` | 放大（按当前尺寸 18% 自适应步进，从中心放大）|
@@ -112,6 +116,9 @@ perler-bead-generator/
 | `0` | 重置：自动适配整张图纸 |
 | `↑ ↓ ← →` | 平移视窗 1 格 |
 | `Shift + 方向键` | 平移视窗 5 格 |
+| `Alt + 鼠标拖动` | 平移视窗（任意方向）|
+
+> 工具键 `B/E/G/I` 跟 Photoshop / Aseprite / Procreate 一致——会用任何一个就直接上手。
 
 ### Trackpad gestures · 触控板手势
 - **两指滑动** → 平移视窗（自然滚动方向）

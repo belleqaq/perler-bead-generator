@@ -149,6 +149,17 @@
         $$('[data-tool]').forEach(b => b.classList.toggle('active', b === btn));
       });
     });
+
+    // 键盘快捷键：B/E/G/I（Photoshop / Aseprite / Procreate 通用键位）
+    const TOOL_KEYS = { b: 'draw', e: 'erase', g: 'fill', i: 'pick' };
+    document.addEventListener('keydown', (e) => {
+      if (e.target.matches('input, textarea, select, [contenteditable]')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const tool = TOOL_KEYS[e.key.toLowerCase()];
+      if (!tool) return;
+      const btn = document.querySelector(`[data-tool="${tool}"]`);
+      if (btn) { btn.click(); e.preventDefault(); }
+    });
   }
 
   // ─── 尺寸 ────────────────────────────────────────────────────

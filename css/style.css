@@ -207,6 +207,17 @@ body::before {
   position: absolute; left: 4px; right: 4px; bottom: -1px;
   height: 2px; background: var(--accent);
 }
+.tool-btn .kbd {
+  position: absolute;
+  top: 3px; right: 4px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--ink-3);
+  opacity: 0.6;
+}
+.tool-btn.active .kbd { color: var(--paper); opacity: 0.7; }
 
 /* =========================================================
    Current color display
