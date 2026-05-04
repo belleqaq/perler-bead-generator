@@ -40,9 +40,6 @@
 
 直接在 Chrome / Safari / Edge 里打开就可以。手机也能用，但电脑上体验更好（屏幕大、能拖图片）。
 
-> 💡 第一次打开如果是 404，是因为 GitHub Pages 还没启用。仓库管理员（belleqaq）在 GitHub 网页操作一次：
-> Repo 页 → **Settings** → 左边栏 **Pages** → Source 选 `main` 分支、`/ (root)` 文件夹 → Save。等 1–2 分钟链接就能用了。
-
 ---
 
 ### 💾 想离线用 / 想留一份在电脑上
