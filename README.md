@@ -55,19 +55,6 @@
 
 ---
 
-### 🛠 给开发者 · For developers
-
-```bash
-git clone https://github.com/belleqaq/perler-bead-generator.git
-cd perler-bead-generator
-python3 -m http.server 8000     # → http://localhost:8000
-# 或者 npx serve 等任意静态服务器都行
-```
-
-无构建步骤、无 npm 依赖。改完 JS/CSS 直接刷新浏览器。
-
----
-
 ### 🤖 AI 功能要不要 Key？
 
 - **不需要**：手绘、上传图片自动转图纸、所有 220+ 色板切换、缩放平移、PNG/SVG/PDF 导出 —— 都不需要任何账号
