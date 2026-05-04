@@ -23,11 +23,13 @@ class BeadEditor {
     this._isDrawing = false;
     this._lastCell = null;
 
-    // 框选
-    this.selection        = null;   // { x1, y1, x2, y2 } 网格坐标（拖动中未排序）
+    // 框选 & 套索
+    this.selection        = null;   // { x1,y1,x2,y2[,cells:Set] } — cells 存在时为套索遮罩
     this._clipboard       = null;   // 2D array of color objects
     this._clipboardOrigin = null;   // { x, y } 复制时的左上角
     this._isSelecting     = false;
+    this._lassoPath       = [];     // [{gx, gy}] 套索路径（网格坐标）
+    this._isLassoing      = false;
 
     // 视窗：当 cellSize 大到画板装不下时，只渲染视窗内的格子，由用户平移
     this.viewX = 0;
@@ -311,8 +313,17 @@ class BeadEditor {
 
   clearSelection() {
     this.selection = null;
+    this._lassoPath = [];
     this.render();
     this._emit('selectionChanged');
+  }
+
+  // 判断格子是否在当前选区内（支持矩形 / 套索遮罩两种模式）
+  _inSelection(x, y) {
+    if (!this.selection) return false;
+    const sel = this._normSel();
+    if (!sel || x < sel.x1 || x > sel.x2 || y < sel.y1 || y > sel.y2) return false;
+    return sel.cells ? sel.cells.has(`${x},${y}`) : true;
   }
 
   selectAll() {
@@ -328,7 +339,8 @@ class BeadEditor {
     this._clipboard = [];
     for (let y = sel.y1; y <= sel.y2; y++) {
       const row = [];
-      for (let x = sel.x1; x <= sel.x2; x++) row.push(this.grid[y][x]);
+      for (let x = sel.x1; x <= sel.x2; x++)
+        row.push(this._inSelection(x, y) ? this.grid[y][x] : null);
       this._clipboard.push(row);
     }
   }
@@ -344,7 +356,7 @@ class BeadEditor {
     this._saveState();
     for (let y = sel.y1; y <= sel.y2; y++)
       for (let x = sel.x1; x <= sel.x2; x++)
-        this.grid[y][x] = null;
+        if (this._inSelection(x, y)) this.grid[y][x] = null;
     this.render();
     this._emit('gridChanged');
   }
@@ -356,7 +368,7 @@ class BeadEditor {
     const color = this.currentColor;
     for (let y = sel.y1; y <= sel.y2; y++)
       for (let x = sel.x1; x <= sel.x2; x++)
-        this.grid[y][x] = color;
+        if (this._inSelection(x, y)) this.grid[y][x] = color;
     this.render();
     this._emit('gridChanged');
   }
@@ -382,6 +394,63 @@ class BeadEditor {
     };
     this.render();
     this._emit('gridChanged');
+    this._emit('selectionChanged');
+  }
+
+  // ─── 全局换色 ─────────────────────────────────────────────────
+
+  replaceColor(fromColor, toColor) {
+    if (!fromColor || !toColor || fromColor.code === toColor.code) return;
+    this._saveState();
+    let changed = false;
+    for (let y = 0; y < this.rows; y++)
+      for (let x = 0; x < this.cols; x++)
+        if (this.grid[y][x]?.code === fromColor.code) {
+          this.grid[y][x] = toColor; changed = true;
+        }
+    if (changed) { this.render(); this._emit('gridChanged'); }
+  }
+
+  // ─── 套索选择 ─────────────────────────────────────────────────
+
+  _pointInPolygon(px, py, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].gx, yi = polygon[i].gy;
+      const xj = polygon[j].gx, yj = polygon[j].gy;
+      if (((yi > py) !== (yj > py)) &&
+          (px < (xj - xi) * (py - yi) / (yj - yi) + xi))
+        inside = !inside;
+    }
+    return inside;
+  }
+
+  _buildLassoSelection() {
+    const path = this._lassoPath;
+    if (path.length < 3) {
+      this.selection = null;
+      this._lassoPath = [];
+      this.render();
+      this._emit('selectionChanged');
+      return;
+    }
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const p of path) {
+      if (p.gx < x1) x1 = p.gx; if (p.gy < y1) y1 = p.gy;
+      if (p.gx > x2) x2 = p.gx; if (p.gy > y2) y2 = p.gy;
+    }
+    x1 = Math.max(0, Math.floor(x1));         y1 = Math.max(0, Math.floor(y1));
+    x2 = Math.min(this.cols - 1, Math.ceil(x2)); y2 = Math.min(this.rows - 1, Math.ceil(y2));
+
+    const cells = new Set();
+    for (let y = y1; y <= y2; y++)
+      for (let x = x1; x <= x2; x++)
+        if (this._pointInPolygon(x + 0.5, y + 0.5, path))
+          cells.add(`${x},${y}`);
+
+    this.selection = cells.size ? { x1, y1, x2, y2, cells } : null;
+    this._lassoPath = [];
+    this.render();
     this._emit('selectionChanged');
   }
 
@@ -433,6 +502,13 @@ class BeadEditor {
         this._emit('selectionChanged');
         return;
       }
+      // 套索工具：开始徒手画范围
+      if (this.tool === 'lasso') {
+        const cell = getCell(e);
+        this._isLassoing = true;
+        this._lassoPath = [{ gx: cell.x, gy: cell.y }];
+        return;
+      }
       this._isDrawing = true;
       this._lastCell = null;
       const cell = getCell(e);
@@ -471,9 +547,20 @@ class BeadEditor {
         }
         return;
       }
+      // 套索拖动：每移动 ≥0.3 格才记录一个点，避免冗余
+      if (this._isLassoing) {
+        const cell = getCell(e);
+        const last = this._lassoPath[this._lassoPath.length - 1];
+        const dx = cell.x - last.gx, dy = cell.y - last.gy;
+        if (dx * dx + dy * dy >= 0.09) {
+          this._lassoPath.push({ gx: cell.x, gy: cell.y });
+          this.render();
+        }
+        return;
+      }
       // 光标提示
       this.canvas.style.cursor = e.altKey ? 'grab'
-        : (this.tool === 'select' ? 'crosshair' : '');
+        : (this.tool === 'select' || this.tool === 'lasso' ? 'crosshair' : '');
       if (!this._isDrawing) return;
       const cell = getCell(e);
       if (this._lastCell && cell.x === this._lastCell.x && cell.y === this._lastCell.y) return;
@@ -484,6 +571,10 @@ class BeadEditor {
     document.addEventListener('mouseup', () => {
       this._isDrawing = false;
       this._isSelecting = false;
+      if (this._isLassoing) {
+        this._isLassoing = false;
+        this._buildLassoSelection();
+      }
       if (this._isPanning) {
         this._isPanning = false;
         this.canvas.style.cursor = '';
@@ -492,13 +583,15 @@ class BeadEditor {
 
     // Alt 键按下/松开时切换光标提示（即使没在拖也能感知到可平移）
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Alt' && !this._isDrawing && !this._isPanning) {
+      if (e.key === 'Alt' && !this._isDrawing && !this._isPanning && !this._isLassoing) {
         this.canvas.style.cursor = 'grab';
       }
     });
     document.addEventListener('keyup', (e) => {
-      if (e.key === 'Alt' && !this._isPanning)
-        this.canvas.style.cursor = this.tool === 'select' ? 'crosshair' : '';
+      if (e.key === 'Alt' && !this._isPanning) {
+        const isSel = this.tool === 'select' || this.tool === 'lasso';
+        this.canvas.style.cursor = isSel ? 'crosshair' : '';
+      }
     });
 
     // Touch
@@ -661,35 +754,68 @@ class BeadEditor {
       }
     }
 
-    // ── 框选覆盖层 ─────────────────────────────────────────────
+    // ── 框选 / 套索 覆盖层 ────────────────────────────────────
     if (this.selection) {
       const sel = this._normSel();
       if (sel) {
-        // 裁剪到视窗范围
         const vx1 = Math.max(sel.x1, originX) - originX;
         const vy1 = Math.max(sel.y1, originY) - originY;
         const vx2 = Math.min(sel.x2, originX + viewC - 1) - originX;
         const vy2 = Math.min(sel.y2, originY + viewR - 1) - originY;
-        if (vx1 <= vx2 && vy1 <= vy2) {
-          const sx = MARGIN + vx1 * cellSize;
-          const sy = MARGIN + vy1 * cellSize;
-          const sw = (vx2 - vx1 + 1) * cellSize;
-          const sh = (vy2 - vy1 + 1) * cellSize;
-          // 蓝色半透明填充
+
+        if (sel.cells) {
+          // 套索遮罩：逐格着色（只遍历视窗内格子）
+          ctx.fillStyle = 'rgba(30, 100, 255, 0.28)';
+          for (let ly = Math.max(0, vy1); ly <= Math.min(vy2, viewR - 1); ly++)
+            for (let lx = Math.max(0, vx1); lx <= Math.min(vx2, viewC - 1); lx++)
+              if (sel.cells.has(`${originX + lx},${originY + ly}`))
+                ctx.fillRect(MARGIN + lx * cellSize, MARGIN + ly * cellSize, cellSize, cellSize);
+        } else if (vx1 <= vx2 && vy1 <= vy2) {
+          // 矩形框选：整块填色
           ctx.fillStyle = 'rgba(30, 100, 255, 0.16)';
-          ctx.fillRect(sx, sy, sw, sh);
-          // 蚂蚁线边框（双色虚线模拟）
+          ctx.fillRect(MARGIN + vx1 * cellSize, MARGIN + vy1 * cellSize,
+                       (vx2 - vx1 + 1) * cellSize, (vy2 - vy1 + 1) * cellSize);
+        }
+
+        // 蚂蚁线边框（两色虚线模拟）
+        if (vx1 <= vx2 && vy1 <= vy2) {
+          const sx = MARGIN + vx1 * cellSize, sy = MARGIN + vy1 * cellSize;
+          const sw = (vx2 - vx1 + 1) * cellSize, sh = (vy2 - vy1 + 1) * cellSize;
           ctx.save();
           ctx.lineWidth = 2;
           ctx.setLineDash([6, 4]);
           ctx.strokeStyle = '#1460ff';
           ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+          ctx.strokeStyle = 'rgba(255,255,255,0.85)';
           ctx.lineDashOffset = 5;
           ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
           ctx.restore();
         }
       }
+    }
+
+    // ── 套索拖动中的预览路径 ───────────────────────────────────
+    if (this._lassoPath.length > 1 && !this._renderFullGrid) {
+      ctx.save();
+      ctx.beginPath();
+      const toScreen = (p) => ({
+        sx: MARGIN + (p.gx - originX) * cellSize,
+        sy: MARGIN + (p.gy - originY) * cellSize,
+      });
+      const f = toScreen(this._lassoPath[0]);
+      ctx.moveTo(f.sx, f.sy);
+      for (let i = 1; i < this._lassoPath.length; i++) {
+        const s = toScreen(this._lassoPath[i]);
+        ctx.lineTo(s.sx, s.sy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(30, 100, 255, 0.10)';
+      ctx.fill();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = '#1460ff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
     }
   }
 

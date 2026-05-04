@@ -722,7 +722,7 @@ body::before {
 
 .stats-row {
   display: grid;
-  grid-template-columns: 16px 42px 1fr auto auto;
+  grid-template-columns: 16px 42px 1fr auto auto auto;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
@@ -733,6 +733,20 @@ body::before {
 }
 .stats-row:hover { background: var(--bg-2); }
 .stats-row:last-child { border-bottom: none; }
+.stats-replace {
+  background: none;
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 1px 4px;
+  font-size: 11px;
+  color: var(--ink-3);
+  opacity: 0;
+  transition: opacity 0.15s;
+  line-height: 1.4;
+}
+.stats-row:hover .stats-replace { opacity: 1; }
+.stats-replace:hover { background: var(--bg-3); color: var(--ink); opacity: 1; }
 
 .stats-sw {
   width: 14px; height: 14px;

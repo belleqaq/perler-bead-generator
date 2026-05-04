@@ -139,6 +139,10 @@
     $('#current-color-swatch').style.background = color.hex;
     $('#current-color-code').textContent = color.code;
     $('#current-color-name').textContent = color.hex;
+    // 框选 / 套索模式下，点色板直接填充选区
+    if (editor.selection && (editor.tool === 'select' || editor.tool === 'lasso')) {
+      editor.fillSelection();
+    }
   }
 
   // ─── 工具栏 ──────────────────────────────────────────────────
@@ -150,8 +154,8 @@
       });
     });
 
-    // 键盘快捷键：B/E/G/I/S（Photoshop / Aseprite / Procreate 通用键位）
-    const TOOL_KEYS = { b: 'draw', e: 'erase', g: 'fill', i: 'pick', s: 'select' };
+    // 键盘快捷键：B/E/G/I/S/L
+    const TOOL_KEYS = { b: 'draw', e: 'erase', g: 'fill', i: 'pick', s: 'select', l: 'lasso' };
     document.addEventListener('keydown', (e) => {
       if (e.target.matches('input, textarea, select, [contenteditable]')) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -777,7 +781,12 @@
         <span class="stats-code">${s.color.code}</span>
         <span class="stats-name">${colorName(s.color.code)}</span>
         <span class="stats-count">${s.count}</span>
-        <span class="stats-pct">${pct}%</span>`;
+        <span class="stats-pct">${pct}%</span>
+        <button class="stats-replace" title="${t('action.replace-color')}">⇄</button>`;
+      row.querySelector('.stats-replace').addEventListener('click', (e) => {
+        e.stopPropagation();
+        editor.replaceColor(s.color, editor.currentColor);
+      });
       row.addEventListener('click', () => selectColor(s.color));
       list.appendChild(row);
     });
