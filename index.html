@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>拼豆图纸生成器 · Perler Bead Pattern Generator</title>
+  <meta name="description" content="A free, in-browser perler / hama bead pattern generator. Draw, convert images, and export as PNG/SVG/PDF.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══════════════ HEADER ═══════════════ -->
+  <header class="app-header">
+    <div class="masthead">
+      <div class="mast-meta">
+        <span><span class="dot"></span>EST. 2026</span>
+        <span>VOL.01</span>
+        <span>HAMA · MIDI · 5MM</span>
+      </div>
+      <h1 class="mast-title" data-i18n="app.title">拼豆图纸生成器</h1>
+      <div class="mast-sub" data-i18n="app.subtitle">PERLER BEAD PATTERN STUDIO</div>
+      <div class="mast-tagline" data-i18n="app.tagline">手绘 · 图片转换 · 一键导出图纸</div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-lang" class="btn btn-mini" data-i18n="lang.toggle">EN</button>
+    </div>
+  </header>
+
+  <!-- ═══════════════ LEFT PANEL ═══════════════ -->
+  <aside class="app-left">
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.tools">工具</h2>
+      <div class="tools">
+        <button class="tool-btn active" data-tool="draw">
+          <span class="ico">✎</span><span data-i18n="tool.draw">绘制</span>
+        </button>
+        <button class="tool-btn" data-tool="erase">
+          <span class="ico">⌫</span><span data-i18n="tool.erase">橡皮</span>
+        </button>
+        <button class="tool-btn" data-tool="fill">
+          <span class="ico">⬛</span><span data-i18n="tool.fill">填充</span>
+        </button>
+        <button class="tool-btn" data-tool="pick">
+          <span class="ico">◉</span><span data-i18n="tool.pick">取色</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.palette">色板</h2>
+      <div class="current-color">
+        <div class="current-color-swatch" id="current-color-swatch"></div>
+        <div class="current-color-info">
+          <span class="current-color-code" id="current-color-code">H40</span>
+          <span class="current-color-name" id="current-color-name">黑色</span>
+        </div>
+      </div>
+      <div class="palette-grid" id="palette-grid"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.size">画布尺寸</h2>
+      <div class="size-row">
+        <label data-i18n="size.cols">列</label>
+        <input type="number" class="input-num" id="size-cols" value="64" min="5" max="200">
+        <label data-i18n="size.rows">行</label>
+        <input type="number" class="input-num" id="size-rows" value="64" min="5" max="200">
+        <button class="btn btn-mini" id="size-apply" data-i18n="size.apply">应用</button>
+      </div>
+      <div class="preset-row">
+        <button class="btn btn-mini" data-preset="29x29">29²</button>
+        <button class="btn btn-mini" data-preset="50x50">50²</button>
+        <button class="btn btn-mini" data-preset="64x64">64²</button>
+        <button class="btn btn-mini" data-preset="100x100">100²</button>
+        <button class="btn btn-mini" data-preset="150x150">150²</button>
+        <button class="btn btn-mini" data-preset="200x200">200²</button>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ═══════════════ MAIN ═══════════════ -->
+  <main class="app-main">
+    <div class="canvas-frame">
+      <canvas id="bead-canvas"></canvas>
+    </div>
+  </main>
+
+  <!-- ═══════════════ RIGHT PANEL ═══════════════ -->
+  <aside class="app-right">
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.actions">操作</h2>
+      <div class="btn-row">
+        <button class="btn" id="btn-undo">
+          <span class="ico">↶</span><span data-i18n="action.undo">撤销</span>
+        </button>
+        <button class="btn" id="btn-redo">
+          <span class="ico">↷</span><span data-i18n="action.redo">重做</span>
+        </button>
+      </div>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button class="btn active" id="btn-grid" data-i18n="action.grid">网格</button>
+        <button class="btn active" id="btn-numbers" data-i18n="action.numbers">坐标</button>
+        <button class="btn btn-accent" id="btn-clear" data-i18n="action.clear">清空</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.image">图片转换</h2>
+      <div class="drop-zone" id="drop-zone">
+        <span class="icon">⊕</span>
+        <span data-i18n="image.dragdrop">拖拽图片至此 / 点击选择</span>
+        <div class="drop-hint" data-i18n="image.hint">将图片转换成拼豆图案。可调整长边像素数获得更多细节。</div>
+      </div>
+      <input type="file" id="image-input" accept="image/*" hidden>
+
+      <div class="img-opts">
+        <label class="img-opt-row">
+          <input type="checkbox" id="opt-auto-size" checked>
+          <span data-i18n="image.auto-size">自动尺寸</span>
+          <input type="number" class="input-num input-mini" id="opt-target-size" value="80" min="20" max="200" title="目标长边像素数 / Target longest side">
+        </label>
+
+        <label class="img-opt-row">
+          <input type="checkbox" id="opt-dither">
+          <span data-i18n="image.dither">抖动 (保留渐变)</span>
+        </label>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.brightness">亮度</span>
+          <input type="range" id="opt-brightness" min="-50" max="50" value="0" step="5">
+          <span class="slider-val" id="opt-brightness-val">0</span>
+        </div>
+
+        <div class="img-opt-row slider-row">
+          <span data-i18n="image.contrast">对比度</span>
+          <input type="range" id="opt-contrast" min="0.5" max="2.0" value="1.0" step="0.1">
+          <span class="slider-val" id="opt-contrast-val">1.0</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.stats">色号统计</h2>
+      <div class="stats-summary">
+        <div class="stat-card">
+          <span class="num" id="stat-total">0</span>
+          <span class="lbl" data-i18n="stats.total">总计</span>
+        </div>
+        <div class="stat-card">
+          <span class="num" id="stat-colors">0</span>
+          <span class="lbl" data-i18n="stats.colors">色数</span>
+        </div>
+      </div>
+      <div class="stats-list" id="stats-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title" data-i18n="panel.export">导出</h2>
+
+      <div class="export-opts">
+        <label><input type="checkbox" id="opt-coded" checked> <span data-i18n="pdf.coded">带色号网格</span></label>
+        <label><input type="checkbox" id="opt-colored" checked> <span data-i18n="pdf.colored">彩色网格</span></label>
+        <label><input type="checkbox" id="opt-stats" checked> <span data-i18n="panel.stats">色号统计</span></label>
+        <label><input type="checkbox" id="opt-materials" checked> <span data-i18n="pdf.materials">材料清单</span></label>
+      </div>
+
+      <div class="btn-stack">
+        <button class="btn" id="exp-png" data-i18n="export.png">导出 PNG</button>
+        <button class="btn" id="exp-svg" data-i18n="export.svg">导出 SVG</button>
+        <button class="btn btn-primary" id="exp-print" data-i18n="export.pdf-print">打印图纸</button>
+        <button class="btn btn-primary" id="exp-pdf" data-i18n="export.pdf-file">导出 PDF</button>
+        <button class="btn" id="exp-json" data-i18n="export.json">保存工程</button>
+        <button class="btn" id="exp-json-load" data-i18n="export.json-load">打开工程</button>
+        <input type="file" id="proj-input" accept=".json,.bead.json" hidden>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ═══════════════ FOOTER ═══════════════ -->
+  <footer class="app-footer">
+    <div>
+      <span data-i18n="footer.made">用 ❤ 做</span>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/" target="_blank" rel="noopener" data-i18n="footer.opensource">开源项目</a>
+    </div>
+    <div>MIT LICENSE · 2026</div>
+  </footer>
+
+</div>
+
+<script src="js/i18n.js"></script>
+<script src="js/palette.js"></script>
+<script src="js/processor.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
