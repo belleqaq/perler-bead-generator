@@ -133,6 +133,9 @@ const Exporter = {
   },
 
   // ─── PDF 文件 (jsPDF) ─────────────────────────────────────
+  // 关键：jsPDF 默认 helvetica 字体不含 CJK 字形，直接 doc.text 中文会乱码。
+  // 解法：所有文字都先用 canvas 的 fillText（用系统 PingFang/Noto 字体，原生支持
+  // 中英任何语言）渲染成图，jsPDF 只负责 addImage 拼版。零字体依赖。
   async exportPDF(editor, opts = {}) {
     if (typeof window.jspdf === 'undefined') {
       alert('jsPDF not loaded');
@@ -142,102 +145,176 @@ const Exporter = {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
     const PAGE_W = 210, PAGE_H = 297, M = 12;
+    const CONTENT_W = PAGE_W - 2 * M;
     let y = M;
 
-    // ── Title block ──────────────────────────────────────
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.text(t('pdf.title'), M, y + 6);
-    y += 10;
-    doc.setDrawColor(60); doc.setLineWidth(0.4);
-    doc.line(M, y, PAGE_W - M, y);
-    y += 6;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
     const stats = editor.getColorStats();
     const total = editor.getTotalBeads();
+
+    const place = (img, maxWmm) => {
+      const wmm = Math.min(CONTENT_W, maxWmm ?? CONTENT_W);
+      const hmm = wmm * (img.height / img.width);
+      if (y + hmm > PAGE_H - M) { doc.addPage(); y = M; }
+      doc.addImage(img.dataURL, 'PNG', M, y, wmm, hmm);
+      y += hmm + 4;
+    };
+
+    // ── 标题 + meta ──────────────────────────────────────
+    place(this._renderTitleBlock(editor, stats, total));
+    y += 2;
+
+    // ── 带色号网格 ───────────────────────────────────────
+    if (opts.codedGrid !== false) {
+      place(this._renderSectionHeader(t('pdf.coded')), 80);
+      place(this._renderGridImageDataURL(editor, { coded: true, cell: 24 }), 170);
+      y += 2;
+    }
+
+    // ── 彩色网格 ─────────────────────────────────────────
+    if (opts.coloredGrid !== false) {
+      place(this._renderSectionHeader(t('pdf.colored')), 80);
+      place(this._renderGridImageDataURL(editor, { coded: false, cell: 24 }), 170);
+      y += 2;
+    }
+
+    // ── 材料清单 ─────────────────────────────────────────
+    if (opts.materialsList !== false && stats.length) {
+      place(this._renderSectionHeader(t('pdf.materials')), 80);
+      // 表格可能很长，按页分批
+      const rowsPerPage = 38;
+      for (let i = 0; i < stats.length; i += rowsPerPage) {
+        const chunk = stats.slice(i, i + rowsPerPage);
+        const tableImg = this._renderMaterialsTable(chunk, total, i === 0);
+        place(tableImg);
+      }
+    }
+
+    doc.save('perler-pattern.pdf');
+  },
+
+  // ─── 内部：渲染文字块到 canvas（用系统 CJK 字体）──────────
+  _txtCanvas(width, height) {
+    const dpr = 2; // PDF 高清
+    const c = document.createElement('canvas');
+    c.width = width * dpr;
+    c.height = height * dpr;
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.textBaseline = 'top';
+    return { c, ctx, dpr, w: width, h: height };
+  },
+
+  _font(size, weight = 'normal') {
+    return `${weight} ${size}px -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif`;
+  },
+
+  _renderTitleBlock(editor, stats, total) {
+    const W = 800, H = 90;
+    const { c, ctx } = this._txtCanvas(W, H);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+
+    // 标题
+    ctx.fillStyle = '#1d1a16';
+    ctx.font = this._font(28, 'bold');
+    ctx.fillText(t('pdf.title'), 0, 0);
+
+    // 分隔线
+    ctx.strokeStyle = '#1d1a16';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, 42); ctx.lineTo(W, 42);
+    ctx.stroke();
+
+    // meta
+    ctx.fillStyle = '#555';
+    ctx.font = this._font(13);
     const meta = [
       `${t('pdf.size')}: ${editor.cols} × ${editor.rows}`,
       `${t('pdf.total')}: ${total}`,
       `${t('pdf.colors')}: ${stats.length}`,
       `${t('pdf.generated')}: ${new Date().toLocaleString()}`,
     ];
-    meta.forEach((line, i) => doc.text(line, M + (i % 2) * 95, y + Math.floor(i / 2) * 5));
-    y += 14;
+    meta.forEach((line, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      ctx.fillText(line, col * (W / 2), 52 + row * 19);
+    });
 
-    // ── Coded grid ───────────────────────────────────────
-    if (opts.codedGrid !== false) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text(t('pdf.coded'), M, y);
-      y += 4;
+    return { dataURL: c.toDataURL('image/png'), width: c.width, height: c.height };
+  },
 
-      const gridImg = this._renderGridImageDataURL(editor, { coded: true, cell: 24 });
-      const aspect = gridImg.height / gridImg.width;
-      const drawW = Math.min(PAGE_W - 2 * M, 160);
-      const drawH = drawW * aspect;
+  _renderSectionHeader(text) {
+    const W = 800, H = 38;
+    const { c, ctx } = this._txtCanvas(W, H);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1d1a16';
+    ctx.font = this._font(15, 'bold');
+    ctx.fillText(text, 0, 6);
+    ctx.strokeStyle = '#1d1a16';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, 30); ctx.lineTo(W, 30);
+    ctx.stroke();
+    return { dataURL: c.toDataURL('image/png'), width: c.width, height: c.height };
+  },
 
-      // page break check
-      if (y + drawH > PAGE_H - M) { doc.addPage(); y = M; }
+  _renderMaterialsTable(rows, total, includeHeader) {
+    const W = 800;
+    const ROW_H = 22;
+    const HEADER_H = includeHeader ? 26 : 0;
+    const H = HEADER_H + rows.length * ROW_H + 4;
+    const { c, ctx } = this._txtCanvas(W, H);
 
-      doc.addImage(gridImg.dataURL, 'PNG', M, y, drawW, drawH);
-      y += drawH + 8;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+
+    const COL = { code: 32, name: 130, count: 600, pct: 720 };
+
+    if (includeHeader) {
+      ctx.fillStyle = '#f5efe4';
+      ctx.fillRect(0, 0, W, HEADER_H);
+      ctx.fillStyle = '#1d1a16';
+      ctx.font = this._font(12, 'bold');
+      ctx.fillText(t('stats.code'),  COL.code, 5);
+      ctx.fillText(t('stats.name'),  COL.name, 5);
+      ctx.textAlign = 'right';
+      ctx.fillText(t('stats.count'), COL.count, 5);
+      ctx.fillText('%',              COL.pct,   5);
+      ctx.textAlign = 'left';
     }
 
-    // ── Colored grid ─────────────────────────────────────
-    if (opts.coloredGrid !== false) {
-      if (y > PAGE_H - 80) { doc.addPage(); y = M; }
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text(t('pdf.colored'), M, y);
-      y += 4;
+    ctx.font = this._font(12);
+    let y = HEADER_H + 2;
+    for (const s of rows) {
+      // 行底分割线
+      ctx.strokeStyle = '#e6e0d2';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y + ROW_H - 1); ctx.lineTo(W, y + ROW_H - 1);
+      ctx.stroke();
 
-      const gridImg = this._renderGridImageDataURL(editor, { coded: false, cell: 24 });
-      const aspect = gridImg.height / gridImg.width;
-      const drawW = Math.min(PAGE_W - 2 * M, 160);
-      const drawH = drawW * aspect;
+      // 色块
+      ctx.fillStyle = s.color.hex;
+      ctx.fillRect(8, y + 4, 14, 14);
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(8, y + 4, 14, 14);
 
-      if (y + drawH > PAGE_H - M) { doc.addPage(); y = M; }
-      doc.addImage(gridImg.dataURL, 'PNG', M, y, drawW, drawH);
-      y += drawH + 8;
+      // 文字
+      ctx.fillStyle = '#1d1a16';
+      ctx.fillText(s.color.code, COL.code, y + 5);
+      ctx.fillText(colorName(s.color.code), COL.name, y + 5);
+      ctx.textAlign = 'right';
+      ctx.fillText(String(s.count), COL.count, y + 5);
+      ctx.fillText(((s.count / total) * 100).toFixed(1) + '%', COL.pct, y + 5);
+      ctx.textAlign = 'left';
+
+      y += ROW_H;
     }
 
-    // ── Materials list ───────────────────────────────────
-    if (opts.materialsList !== false && stats.length) {
-      if (y > PAGE_H - 60) { doc.addPage(); y = M; }
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text(t('pdf.materials'), M, y);
-      y += 6;
-
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      doc.text(t('stats.code'), M, y);
-      doc.text(t('stats.name'), M + 25, y);
-      doc.text(t('stats.count'), M + 90, y, { align: 'right' });
-      doc.text('%', M + 110, y, { align: 'right' });
-      y += 1;
-      doc.line(M, y, M + 115, y);
-      y += 4;
-
-      doc.setFont('helvetica', 'normal');
-      for (const s of stats) {
-        if (y > PAGE_H - M) { doc.addPage(); y = M; }
-        const pct = ((s.count / total) * 100).toFixed(1);
-        // color swatch
-        doc.setFillColor(s.color.hex);
-        doc.rect(M - 0.2, y - 3, 3, 3, 'F');
-        doc.setTextColor(30);
-        doc.text(s.color.code, M + 5, y);
-        doc.text(colorName(s.color.code), M + 25, y);
-        doc.text(String(s.count), M + 90, y, { align: 'right' });
-        doc.text(pct + '%', M + 110, y, { align: 'right' });
-        y += 5;
-      }
-    }
-
-    doc.save('perler-pattern.pdf');
+    return { dataURL: c.toDataURL('image/png'), width: c.width, height: c.height };
   },
 
   // ─── 内部：渲染网格为 dataURL ──────────────────────────────
