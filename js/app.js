@@ -150,8 +150,8 @@
       });
     });
 
-    // 键盘快捷键：B/E/G/I（Photoshop / Aseprite / Procreate 通用键位）
-    const TOOL_KEYS = { b: 'draw', e: 'erase', g: 'fill', i: 'pick' };
+    // 键盘快捷键：B/E/G/I/S（Photoshop / Aseprite / Procreate 通用键位）
+    const TOOL_KEYS = { b: 'draw', e: 'erase', g: 'fill', i: 'pick', s: 'select' };
     document.addEventListener('keydown', (e) => {
       if (e.target.matches('input, textarea, select, [contenteditable]')) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -214,6 +214,8 @@
       btn.textContent = editor.beadShape === 'square' ? t('action.shape') : t('action.shape-round');
       editor.render();
     });
+    $('#btn-fill-sel')?.addEventListener('click', () => editor.fillSelection());
+    $('#btn-desel')?.addEventListener('click', () => editor.clearSelection());
   }
 
   // ─── 图片上传 ────────────────────────────────────────────────

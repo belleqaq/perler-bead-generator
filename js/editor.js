@@ -23,6 +23,12 @@ class BeadEditor {
     this._isDrawing = false;
     this._lastCell = null;
 
+    // 框选
+    this.selection        = null;   // { x1, y1, x2, y2 } 网格坐标（拖动中未排序）
+    this._clipboard       = null;   // 2D array of color objects
+    this._clipboardOrigin = null;   // { x, y } 复制时的左上角
+    this._isSelecting     = false;
+
     // 视窗：当 cellSize 大到画板装不下时，只渲染视窗内的格子，由用户平移
     this.viewX = 0;
     this.viewY = 0;
@@ -290,6 +296,95 @@ class BeadEditor {
     }
   }
 
+  // ─── 框选（marquee selection）────────────────────────────────
+
+  _normSel() {
+    const s = this.selection;
+    if (!s) return null;
+    return {
+      x1: Math.max(0, Math.min(s.x1, s.x2)),
+      y1: Math.max(0, Math.min(s.y1, s.y2)),
+      x2: Math.min(this.cols - 1, Math.max(s.x1, s.x2)),
+      y2: Math.min(this.rows - 1, Math.max(s.y1, s.y2)),
+    };
+  }
+
+  clearSelection() {
+    this.selection = null;
+    this.render();
+    this._emit('selectionChanged');
+  }
+
+  selectAll() {
+    this.selection = { x1: 0, y1: 0, x2: this.cols - 1, y2: this.rows - 1 };
+    this.render();
+    this._emit('selectionChanged');
+  }
+
+  copySelection() {
+    const sel = this._normSel();
+    if (!sel) return;
+    this._clipboardOrigin = { x: sel.x1, y: sel.y1 };
+    this._clipboard = [];
+    for (let y = sel.y1; y <= sel.y2; y++) {
+      const row = [];
+      for (let x = sel.x1; x <= sel.x2; x++) row.push(this.grid[y][x]);
+      this._clipboard.push(row);
+    }
+  }
+
+  cutSelection() {
+    this.copySelection();
+    this.deleteSelection();
+  }
+
+  deleteSelection() {
+    const sel = this._normSel();
+    if (!sel) return;
+    this._saveState();
+    for (let y = sel.y1; y <= sel.y2; y++)
+      for (let x = sel.x1; x <= sel.x2; x++)
+        this.grid[y][x] = null;
+    this.render();
+    this._emit('gridChanged');
+  }
+
+  fillSelection() {
+    const sel = this._normSel();
+    if (!sel) return;
+    this._saveState();
+    const color = this.currentColor;
+    for (let y = sel.y1; y <= sel.y2; y++)
+      for (let x = sel.x1; x <= sel.x2; x++)
+        this.grid[y][x] = color;
+    this.render();
+    this._emit('gridChanged');
+  }
+
+  pasteClipboard() {
+    if (!this._clipboard || !this._clipboard.length) return;
+    this._saveState();
+    const sel = this._normSel();
+    const ox = sel ? sel.x1 : (this._clipboardOrigin ? this._clipboardOrigin.x : 0);
+    const oy = sel ? sel.y1 : (this._clipboardOrigin ? this._clipboardOrigin.y : 0);
+    const H = this._clipboard.length;
+    const W = this._clipboard[0].length;
+    for (let dy = 0; dy < H; dy++)
+      for (let dx = 0; dx < W; dx++) {
+        const gx = ox + dx, gy = oy + dy;
+        if (gx >= 0 && gx < this.cols && gy >= 0 && gy < this.rows)
+          this.grid[gy][gx] = this._clipboard[dy][dx];
+      }
+    this.selection = {
+      x1: ox, y1: oy,
+      x2: Math.min(this.cols - 1, ox + W - 1),
+      y2: Math.min(this.rows - 1, oy + H - 1),
+    };
+    this.render();
+    this._emit('gridChanged');
+    this._emit('selectionChanged');
+  }
+
   // ─── 事件绑定 ────────────────────────────────────────────────
 
   _bindEvents() {
@@ -327,6 +422,17 @@ class BeadEditor {
         e.preventDefault();
         return;
       }
+      // 框选工具：开始拖选矩形
+      if (this.tool === 'select') {
+        const cell = getCell(e);
+        const cx = Math.max(0, Math.min(this.cols - 1, cell.x));
+        const cy = Math.max(0, Math.min(this.rows - 1, cell.y));
+        this._isSelecting = true;
+        this.selection = { x1: cx, y1: cy, x2: cx, y2: cy };
+        this.render();
+        this._emit('selectionChanged');
+        return;
+      }
       this._isDrawing = true;
       this._lastCell = null;
       const cell = getCell(e);
@@ -352,8 +458,22 @@ class BeadEditor {
         }
         return;
       }
-      // Alt 按下时光标提示可拖
-      this.canvas.style.cursor = e.altKey ? 'grab' : '';
+      // 框选拖动
+      if (this._isSelecting) {
+        const cell = getCell(e);
+        const nx = Math.max(0, Math.min(this.cols - 1, cell.x));
+        const ny = Math.max(0, Math.min(this.rows - 1, cell.y));
+        if (nx !== this.selection.x2 || ny !== this.selection.y2) {
+          this.selection.x2 = nx;
+          this.selection.y2 = ny;
+          this.render();
+          this._emit('selectionChanged');
+        }
+        return;
+      }
+      // 光标提示
+      this.canvas.style.cursor = e.altKey ? 'grab'
+        : (this.tool === 'select' ? 'crosshair' : '');
       if (!this._isDrawing) return;
       const cell = getCell(e);
       if (this._lastCell && cell.x === this._lastCell.x && cell.y === this._lastCell.y) return;
@@ -363,6 +483,7 @@ class BeadEditor {
 
     document.addEventListener('mouseup', () => {
       this._isDrawing = false;
+      this._isSelecting = false;
       if (this._isPanning) {
         this._isPanning = false;
         this.canvas.style.cursor = '';
@@ -376,7 +497,8 @@ class BeadEditor {
       }
     });
     document.addEventListener('keyup', (e) => {
-      if (e.key === 'Alt' && !this._isPanning) this.canvas.style.cursor = '';
+      if (e.key === 'Alt' && !this._isPanning)
+        this.canvas.style.cursor = this.tool === 'select' ? 'crosshair' : '';
     });
 
     // Touch
@@ -405,6 +527,28 @@ class BeadEditor {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); this.undo(); }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
         e.preventDefault(); this.redo();
+      }
+      // Selection shortcuts（不在输入框内时生效）
+      const inInput = e.target.matches('input, textarea, select, [contenteditable]');
+      if (!inInput) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a' && this.tool === 'select') {
+          this.selectAll(); e.preventDefault();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && this.selection) {
+          this.copySelection(); e.preventDefault();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'x' && this.selection) {
+          this.cutSelection(); e.preventDefault();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v' && this._clipboard) {
+          this.pasteClipboard(); e.preventDefault();
+        }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && this.selection && this.tool === 'select') {
+          this.deleteSelection(); e.preventDefault();
+        }
+        if (e.key === 'Escape' && this.selection) {
+          this.clearSelection(); e.preventDefault();
+        }
       }
     });
 
@@ -514,6 +658,37 @@ class BeadEditor {
         ctx.moveTo(MARGIN, MARGIN + y * cellSize);
         ctx.lineTo(MARGIN + viewC * cellSize, MARGIN + y * cellSize);
         ctx.stroke();
+      }
+    }
+
+    // ── 框选覆盖层 ─────────────────────────────────────────────
+    if (this.selection) {
+      const sel = this._normSel();
+      if (sel) {
+        // 裁剪到视窗范围
+        const vx1 = Math.max(sel.x1, originX) - originX;
+        const vy1 = Math.max(sel.y1, originY) - originY;
+        const vx2 = Math.min(sel.x2, originX + viewC - 1) - originX;
+        const vy2 = Math.min(sel.y2, originY + viewR - 1) - originY;
+        if (vx1 <= vx2 && vy1 <= vy2) {
+          const sx = MARGIN + vx1 * cellSize;
+          const sy = MARGIN + vy1 * cellSize;
+          const sw = (vx2 - vx1 + 1) * cellSize;
+          const sh = (vy2 - vy1 + 1) * cellSize;
+          // 蓝色半透明填充
+          ctx.fillStyle = 'rgba(30, 100, 255, 0.16)';
+          ctx.fillRect(sx, sy, sw, sh);
+          // 蚂蚁线边框（双色虚线模拟）
+          ctx.save();
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeStyle = '#1460ff';
+          ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+          ctx.lineDashOffset = 5;
+          ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
+          ctx.restore();
+        }
       }
     }
   }

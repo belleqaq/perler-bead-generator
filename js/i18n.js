@@ -21,6 +21,7 @@ const I18N = {
     'tool.erase': '橡皮',
     'tool.fill': '填充',
     'tool.pick': '取色',
+    'tool.select': '框选',
 
     'action.undo': '撤销',
     'action.redo': '重做',
@@ -29,6 +30,8 @@ const I18N = {
     'action.numbers': '坐标',
     'action.shape': '方形',
     'action.shape-round': '圆形',
+    'action.fill-sel': '填充选区',
+    'action.deselect': '取消选区',
 
     'size.cols': '列',
     'size.rows': '行',
@@ -130,6 +133,7 @@ const I18N = {
     'tool.erase': 'Erase',
     'tool.fill': 'Fill',
     'tool.pick': 'Pick',
+    'tool.select': 'Select',
 
     'action.undo': 'Undo',
     'action.redo': 'Redo',
@@ -138,6 +142,8 @@ const I18N = {
     'action.numbers': 'Coords',
     'action.shape': 'Square',
     'action.shape-round': 'Round',
+    'action.fill-sel': 'Fill Sel',
+    'action.deselect': 'Deselect',
 
     'size.cols': 'Cols',
     'size.rows': 'Rows',
