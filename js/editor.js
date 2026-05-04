@@ -316,6 +316,17 @@ class BeadEditor {
 
     // Mouse
     this.canvas.addEventListener('mousedown', (e) => {
+      // Alt + 拖动 = 平移视窗（不进入绘画模式）
+      if (e.altKey) {
+        this._isPanning = true;
+        this._panStart = {
+          mx: e.clientX, my: e.clientY,
+          vx: this.viewX, vy: this.viewY,
+        };
+        this.canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+        return;
+      }
       this._isDrawing = true;
       this._lastCell = null;
       const cell = getCell(e);
@@ -324,6 +335,25 @@ class BeadEditor {
     });
 
     this.canvas.addEventListener('mousemove', (e) => {
+      // Alt 平移：把鼠标位移换算成"格子"再加到视窗起点
+      if (this._isPanning) {
+        const r = this.canvas.getBoundingClientRect();
+        const s = this.canvas.width / r.width;
+        const dxCells = (e.clientX - this._panStart.mx) * s / this.cellSize;
+        const dyCells = (e.clientY - this._panStart.my) * s / this.cellSize;
+        // 拖鼠标向右 → 看左边的内容 → viewX 减小
+        const newX = Math.round(this._panStart.vx - dxCells);
+        const newY = Math.round(this._panStart.vy - dyCells);
+        if (newX !== this.viewX || newY !== this.viewY) {
+          this.viewX = newX; this.viewY = newY;
+          this._clampView();
+          this.render();
+          this._emit('viewChanged');
+        }
+        return;
+      }
+      // Alt 按下时光标提示可拖
+      this.canvas.style.cursor = e.altKey ? 'grab' : '';
       if (!this._isDrawing) return;
       const cell = getCell(e);
       if (this._lastCell && cell.x === this._lastCell.x && cell.y === this._lastCell.y) return;
@@ -331,7 +361,23 @@ class BeadEditor {
       this._lastCell = cell;
     });
 
-    document.addEventListener('mouseup', () => { this._isDrawing = false; });
+    document.addEventListener('mouseup', () => {
+      this._isDrawing = false;
+      if (this._isPanning) {
+        this._isPanning = false;
+        this.canvas.style.cursor = '';
+      }
+    });
+
+    // Alt 键按下/松开时切换光标提示（即使没在拖也能感知到可平移）
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Alt' && !this._isDrawing && !this._isPanning) {
+        this.canvas.style.cursor = 'grab';
+      }
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'Alt' && !this._isPanning) this.canvas.style.cursor = '';
+    });
 
     // Touch
     this.canvas.addEventListener('touchstart', (e) => {
