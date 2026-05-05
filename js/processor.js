@@ -38,11 +38,12 @@ function imageToGrid(img, cols, rows, opts = {}) {
   const srcData = sctx.getImageData(0, 0, src.width, src.height).data;
 
   // ── Step 2. 把全图采样到 cols × rows ───────────────────
-  // sampling = 'mode'     投票——按 4bit/通道分桶，取最大桶均值；净边/卡通好
-  // sampling = 'mean'     box-filter 平均；照片渐变好但会晕染边缘
-  // sampling = 'pixelart' 中心采样——只取每格中心 40% 区域的 mode；像素画专用
+  // sampling = 'mode'（默认）：投票——每格按 4 位/通道分桶，取最大桶的均值。
+  //                            描边/线稿单色化、避免反走样混色。
+  // sampling = 'mean'：传统 box-filter 平均，平滑照片好但会"晕染"边缘。
   const buf = new Float32Array(cols * rows * 4);
   const W = src.width, H = src.height;
+  const useMode = sampling === 'mode';
 
   for (let py = 0; py < rows; py++) {
     const y0 = Math.floor(py * H / rows);
@@ -52,15 +53,7 @@ function imageToGrid(img, cols, rows, opts = {}) {
       const x1 = Math.max(x0 + 1, Math.floor((px + 1) * W / cols));
       const k = (py * cols + px) * 4;
 
-      if (sampling === 'pixelart') {
-        // 只采格子中心 40% 的区域，彻底排除边缘反走样像素的干扰
-        const marg = Math.max(0, Math.floor((x1 - x0) * 0.3));
-        const margY = Math.max(0, Math.floor((y1 - y0) * 0.3));
-        const cx0 = x0 + marg, cx1 = Math.max(cx0 + 1, x1 - marg);
-        const cy0 = y0 + margY, cy1 = Math.max(cy0 + 1, y1 - margY);
-        const [r, g, b, a] = sampleCellMode(srcData, W, cx0, cy0, cx1, cy1);
-        buf[k] = r; buf[k + 1] = g; buf[k + 2] = b; buf[k + 3] = a;
-      } else if (sampling === 'mode') {
+      if (useMode) {
         const [r, g, b, a] = sampleCellMode(srcData, W, x0, y0, x1, y1);
         buf[k] = r; buf[k + 1] = g; buf[k + 2] = b; buf[k + 3] = a;
       } else {
@@ -68,7 +61,11 @@ function imageToGrid(img, cols, rows, opts = {}) {
         for (let y = y0; y < y1; y++) {
           for (let x = x0; x < x1; x++) {
             const i = (y * W + x) * 4;
-            r += srcData[i]; g += srcData[i + 1]; b += srcData[i + 2]; a += srcData[i + 3]; n++;
+            r += srcData[i];
+            g += srcData[i + 1];
+            b += srcData[i + 2];
+            a += srcData[i + 3];
+            n++;
           }
         }
         buf[k] = r / n; buf[k + 1] = g / n; buf[k + 2] = b / n; buf[k + 3] = a / n;
@@ -573,74 +570,3 @@ function suggestSize(img, targetMax = 80) {
     return { cols: Math.max(5, Math.round(targetMax * ratio)), rows: targetMax };
   }
 }
-
-/**
- * 自动识别像素画的放大倍数（块尺寸）。
- *
- * 核心原理：对于一张 N× 放大的像素画，相邻像素颜色变化永远发生在 N 的整数倍位置，
- * 因此所有水平/垂直"色段"长度都是 N 的倍数，GCD（最大公约数）= N。
- *
- * 步骤：
- *  1. 把图缩到 ≤800px（大图检测速度慢）
- *  2. 对颜色做 5bit/通道量化（消除 JPEG 压缩噪声）
- *  3. 扫描若干行/列，收集所有连续同色段长度
- *  4. 返回所有段长的 GCD，再换算回原图坐标
- *
- * 返回 { blockSize, cols, rows }
- *  - blockSize: 原图上每个"像素画像素"的边长（单位：原图像素）
- *  - cols/rows: 建议的图纸尺寸（已 clamp 到 5–200）
- */
-function detectPixelBlockSize(img) {
-  const W0 = img.naturalWidth  || img.width;
-  const H0 = img.naturalHeight || img.height;
-  const MAX_DIM = 800;
-  const scale = Math.min(1, MAX_DIM / Math.max(W0, H0));
-  const W = Math.round(W0 * scale);
-  const H = Math.round(H0 * scale);
-
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, W, H);
-  const data = ctx.getImageData(0, 0, W, H).data;
-
-  // 5 bit/channel 量化：消除轻微 JPEG 压缩色差
-  const qkey = (i) => ((data[i] >> 3) << 10) | ((data[i + 1] >> 3) << 5) | (data[i + 2] >> 3);
-
-  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
-  let g = 0;
-
-  // 扫描约 40 行（均匀分布）
-  const rowSamples = Math.min(40, H);
-  for (let si = 0; si < rowSamples && g !== 1; si++) {
-    const y = Math.floor(si * H / rowSamples);
-    let run = 1, prev = qkey(y * W * 4);
-    for (let x = 1; x < W; x++) {
-      const k = qkey((y * W + x) * 4);
-      if (k === prev) { run++; }
-      else { g = g ? gcd(g, run) : run; run = 1; prev = k; }
-    }
-    g = g ? gcd(g, run) : run;
-  }
-
-  // 扫描约 40 列（均匀分布）
-  const colSamples = Math.min(40, W);
-  for (let si = 0; si < colSamples && g !== 1; si++) {
-    const x = Math.floor(si * W / colSamples);
-    let run = 1, prev = qkey(x * 4);
-    for (let y = 1; y < H; y++) {
-      const k = qkey((y * W + x) * 4);
-      if (k === prev) { run++; }
-      else { g = g ? gcd(g, run) : run; run = 1; prev = k; }
-    }
-    g = g ? gcd(g, run) : run;
-  }
-
-  // 转回原图坐标（最小 1）
-  const blockSize = Math.max(1, Math.round(g / scale));
-  const cols = Math.max(5, Math.min(200, Math.round(W0 / blockSize)));
-  const rows = Math.max(5, Math.min(200, Math.round(H0 / blockSize)));
-  return { blockSize, cols, rows };
-}
-

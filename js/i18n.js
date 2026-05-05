@@ -40,7 +40,6 @@ const I18N = {
     'size.apply': '应用',
     'size.preset': '预设',
 
-    'image.pixelart-mode': '✦ 像素画精准模式',
     'image.upload': '上传图片',
     'image.hint': '将图片转换成拼豆图案。可调整长边像素数获得更多细节。',
     'image.dragdrop': '拖拽图片至此 / 点击选择',
@@ -155,7 +154,6 @@ const I18N = {
     'size.apply': 'Apply',
     'size.preset': 'Preset',
 
-    'image.pixelart-mode': '✦ Pixel Art Precise Mode',
     'image.upload': 'Upload Image',
     'image.hint': 'Convert any image to a bead pattern. Tune the long side for more detail.',
     'image.dragdrop': 'Drop image here / click to select',
