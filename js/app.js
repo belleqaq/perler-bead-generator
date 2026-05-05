@@ -315,9 +315,56 @@
       if (el) el.addEventListener('change', scheduleReprocess);
     });
 
+    bindPixelArtMode();
     bindAI();
     bindBackgroundRemoval();
     bindZoom();
+  }
+
+  // ─── 像素画精准模式 ───────────────────────────────────────────
+  function bindPixelArtMode() {
+    const btn = $('#btn-pixelart-mode');
+    if (!btn) return;
+
+    // 上传图片后才可用
+    const refresh = () => { btn.disabled = !lastImage; };
+    document.addEventListener('bead:imageLoaded', refresh);
+    refresh();
+
+    btn.addEventListener('click', () => {
+      if (!lastImage) return;
+
+      // 1. 自动识别像素画块尺寸
+      const { cols, rows } = detectPixelBlockSize(lastImage);
+
+      // 2. 设置图纸尺寸（手动模式）
+      $('#size-cols').value = cols;
+      $('#size-rows').value = rows;
+      const autoSize = $('#opt-auto-size');
+      if (autoSize.checked) {
+        autoSize.checked = false;
+        autoSize.dispatchEvent(new Event('change'));
+      }
+
+      // 3. 关闭所有"简化"处理，只保留净边采样
+      const setSlider = (id, val) => {
+        const el = $(id);
+        if (!el) return;
+        el.value = val;
+        el.dispatchEvent(new Event('input'));
+      };
+      setSlider('#opt-smooth',     0);
+      setSlider('#opt-kmeans',     0);
+      setSlider('#opt-min-region', 1);
+      setSlider('#opt-max-colors', 0);
+      setSlider('#opt-brightness', 0);
+      setSlider('#opt-contrast', 1.0);
+      $('#opt-dither').checked = false;
+      $('#opt-mode-sample').checked = true;
+
+      // 4. 用像素画专用中心采样重新转换
+      reprocessImage({ forceSampling: 'pixelart' });
+    });
   }
 
   // ─── 缩放 + 平移：长按按钮 + 键盘 ────────────────────────────
@@ -667,7 +714,8 @@
   }
 
   // 用当前控件参数重新转换最近一次上传的图片
-  function reprocessImage() {
+  // opts.forceSampling: 'pixelart' | 'mode' | 'mean' — 临时覆盖采样方式
+  function reprocessImage(opts = {}) {
     if (!lastImage) return;
     let cols, rows;
     if ($('#opt-auto-size').checked) {
@@ -680,11 +728,12 @@
       cols = parseInt($('#size-cols').value, 10) || 64;
       rows = parseInt($('#size-rows').value, 10) || 64;
     }
+    const defaultSampling = $('#opt-mode-sample')?.checked ? 'mode' : 'mean';
     const grid = imageToGrid(lastImage, cols, rows, {
       palette:   activePalette,
-      sampling:  $('#opt-mode-sample')?.checked ? 'mode' : 'mean',
-      dither: $('#opt-dither').checked,
-      contrast: parseFloat($('#opt-contrast').value) || 1.0,
+      sampling:  opts.forceSampling || defaultSampling,
+      dither:    $('#opt-dither').checked,
+      contrast:  parseFloat($('#opt-contrast').value) || 1.0,
       brightness: parseInt($('#opt-brightness').value, 10) || 0,
       kmeans:    parseInt($('#opt-kmeans').value, 10) || 0,
       smooth:    parseInt($('#opt-smooth').value, 10) || 0,

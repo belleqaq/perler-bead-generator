@@ -165,6 +165,16 @@
       <input type="file" id="image-input" accept="image/*" hidden>
 
       <div class="img-opts">
+        <div class="img-opt-row" style="margin-bottom:2px;">
+          <button class="btn btn-primary" id="btn-pixelart-mode" disabled
+                  data-i18n="image.pixelart-mode"
+                  title="自动识别像素画格子尺寸，关闭所有平滑/聚类，用中心采样精准还原每个像素">
+            ✦ 像素画精准模式
+          </button>
+        </div>
+      </div>
+
+      <div class="img-opts">
         <div class="img-opt-row">
           <span data-i18n="image.style">风格</span>
           <select id="opt-style" class="select-mini">
